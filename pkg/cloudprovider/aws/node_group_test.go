@@ -1,13 +1,13 @@
 package aws
 
 import (
-	"errors"
 	"math/rand"
 	"testing"
 
 	"github.com/atlassian/escalator/pkg/test"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
+	"github.com/pkg/errors"
 	logrus_test "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/api/core/v1"
