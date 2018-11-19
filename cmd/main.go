@@ -111,18 +111,24 @@ func setupNodeGroups() []controller.NodeGroupOptions {
 
 // setupK8SClient creates the incluster or out of cluster kubernetes config
 func setupK8SClient(kubeConfigFile *string, leaderElect *bool) kubernetes.Interface {
-	var k8sClient kubernetes.Interface
-
 	// if the kubeConfigFile is in the cmdline args then use the out of cluster config
 	if kubeConfigFile != nil && len(*kubeConfigFile) > 0 {
 		logger.Info("Using out of cluster config")
 		if *leaderElect {
 			logger.Warn("Doing leader election out of cluster is not recommended.")
 		}
-		k8sClient = k8s.NewOutOfClusterClient(*kubeConfigFile)
-	} else {
-		logger.Info("Using in cluster config")
-		k8sClient = k8s.NewInClusterClient()
+		k8sClient, err := k8s.NewOutOfClusterClient(*kubeConfigFile)
+		if err != nil {
+			logger.Fatal(err)
+		}
+		return k8sClient
+
+	}
+
+	logger.Info("Using in cluster config")
+	k8sClient, err := k8s.NewInClusterClient()
+	if err != nil {
+		logger.Fatal(err)
 	}
 
 	return k8sClient
@@ -247,6 +253,9 @@ func main() {
 		DryMode:              *drymode,
 		CloudProviderBuilder: cloudBuilder,
 	}
-	c := controller.NewController(opts, stopChan)
+	c, err := controller.NewController(opts, stopChan)
+	if err != nil {
+		logger.Fatal(err)
+	}
 	c.RunForever(true)
 }
