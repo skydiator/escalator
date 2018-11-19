@@ -7,6 +7,7 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/cache"
 
 	"github.com/atlassian/escalator/pkg/cloudprovider"
+	"github.com/atlassian/escalator/pkg/cloudprovider/aws"
 	"github.com/atlassian/escalator/pkg/k8s"
 	"github.com/atlassian/escalator/pkg/metrics"
 	"k8s.io/api/core/v1"
@@ -91,12 +92,12 @@ func NewController(opts Opts, stopChan <-chan struct{}) *Controller {
 		}
 
 		nodegroupMap[nodeGroupOpts.Name] = &NodeGroupState{
-			Opts:                   nodeGroupOpts,
-			NodeGroupLister:        client.Listers[nodeGroupOpts.Name],
+			Opts:            nodeGroupOpts,
+			NodeGroupLister: client.Listers[nodeGroupOpts.Name],
 			// Setup the scaleLock timeouts for this nodegroup
 			scaleUpLock: scaleLock{
 				minimumLockDuration: nodeGroupOpts.ScaleUpCoolDownPeriodDuration(),
-				nodegroup: nodeGroupOpts.Name,
+				nodegroup:           nodeGroupOpts.Name,
 			},
 		}
 	}
@@ -308,7 +309,13 @@ func (c *Controller) scaleNodeGroup(nodegroup string, nodeGroup *NodeGroupState)
 		scaleOptions.nodesDelta = -nodesDelta
 		nodesDeltaResult, err = c.ScaleDown(scaleOptions)
 		if err != nil {
-			log.WithField("nodegroup", nodegroup).Error(err)
+			switch err.(type) {
+			// early return when node not in expected autoscaling group is found
+			case *aws.NodeNotInAutoScalingGroup:
+				return 0, err
+			default:
+				log.WithField("nodegroup", nodegroup).Error(err)
+			}
 		}
 	case nodesDelta > 0:
 		// Try to scale up
@@ -322,7 +329,13 @@ func (c *Controller) scaleNodeGroup(nodegroup string, nodeGroup *NodeGroupState)
 		// reap any expired nodes
 		removed, err := c.TryRemoveTaintedNodes(scaleOptions)
 		if err != nil {
-			log.WithField("nodegroup", nodegroup).Error(err)
+			switch err.(type) {
+			// early return when node not in expected autoscaling group is found
+			case *aws.NodeNotInAutoScalingGroup:
+				return 0, err
+			default:
+				log.WithField("nodegroup", nodegroup).Error(err)
+			}
 		}
 		log.WithField("nodegroup", nodegroup).Infof("Reaper: There were %v empty nodes deleted this round", removed)
 	}
@@ -354,7 +367,13 @@ func (c *Controller) RunOnce() {
 		delta, err := c.scaleNodeGroup(nodeGroupOpts.Name, state)
 		metrics.NodeGroupScaleDelta.WithLabelValues(nodeGroupOpts.Name).Set(float64(delta))
 		if err != nil {
-			log.Warn(err)
+			switch err.(type) {
+			// Error out the app when this error occurs
+			case *aws.NodeNotInAutoScalingGroup:
+				log.Fatal(err)
+			default:
+				log.Warn(err)
+			}
 		}
 	}
 
