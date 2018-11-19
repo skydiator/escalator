@@ -14,18 +14,17 @@ import (
 	"github.com/atlassian/escalator/pkg/k8s"
 	"github.com/atlassian/escalator/pkg/metrics"
 	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
 	"gopkg.in/alecthomas/kingpin.v2"
 	coreV1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/record"
-
-	log "github.com/sirupsen/logrus"
 )
 
 var (
-	loglevel                   = kingpin.Flag("loglevel", "Logging level passed into logrus. 4 for info, 5 for debug.").Short('v').Default(fmt.Sprintf("%d", log.InfoLevel)).Int()
+	loglevel                   = kingpin.Flag("loglevel", "Logging level passed into logrus. 4 for info, 5 for debug.").Short('v').Default(fmt.Sprintf("%d", logrus.InfoLevel)).Int()
 	logfmt                     = kingpin.Flag("logfmt", "Set the format of logging output. (json, ascii)").Default("ascii").Enum("ascii", "json")
 	addr                       = kingpin.Flag("address", "Address to listen to for /metrics").Default(":8080").String()
 	scanInterval               = kingpin.Flag("scaninterval", "How often cluster is reevaluated for scale up or down").Default("60s").Duration()
@@ -40,6 +39,7 @@ var (
 	leaderElectRetryPeriod     = kingpin.Flag("leader-elect-retry-period", "Leader election retry period").Default("2s").Duration()
 	leaderElectConfigNamespace = kingpin.Flag("leader-elect-config-namespace", "Leader election config map namespace").Default("kube-system").String()
 	leaderElectConfigName      = kingpin.Flag("leader-elect-config-name", "Leader election config map name").Default("escalator-leader-elect").String()
+	logger                     = logrus.New()
 )
 
 // cloudProviderBuilder builds the requested cloud provider. aws, gce, etc
@@ -59,7 +59,7 @@ func (b cloudProviderBuilder) Build() (cloudprovider.CloudProvider, error) {
 		}.Build()
 	default:
 		err := fmt.Errorf("provider %v does not exist", b.ProviderOpts.ProviderID)
-		log.Fatal(err)
+		logger.Fatal(err)
 		return nil, err
 	}
 }
@@ -74,6 +74,7 @@ func setupCloudProvider(nodegroups []controller.NodeGroupOptions) cloudprovider.
 		ProviderOpts: cloudprovider.BuildOpts{
 			ProviderID:   *cloudProviderID,
 			NodeGroupIDs: nodegroupIDs,
+			Logger:       logger,
 		},
 	}
 	return cloudBuilder
@@ -84,25 +85,25 @@ func setupNodeGroups() []controller.NodeGroupOptions {
 	// nodegroupConfigFile is required by kingpin. Won't get to here if it's not defined
 	configFile, err := os.Open(*nodegroupConfigFile)
 	if err != nil {
-		log.Fatalf("Failed to open configFile: %v", err)
+		logger.Fatalf("Failed to open configFile: %v", err)
 	}
 	nodegroups, err := controller.UnmarshalNodeGroupOptions(configFile)
 	if err != nil {
-		log.Fatalf("Failed to decode configFile: %v", err)
+		logger.Fatalf("Failed to decode configFile: %v", err)
 	}
 
 	// Validate each nodegroup options
 	for _, nodegroup := range nodegroups {
 		errs := controller.ValidateNodeGroup(nodegroup)
 		if len(errs) > 0 {
-			log.WithField("nodegroup", nodegroup.Name).Error("Validating options: [FAIL]")
+			logger.WithField("nodegroup", nodegroup.Name).Error("Validating options: [FAIL]")
 			for _, err := range errs {
-				log.WithError(err).Error("failed check")
+				logger.WithError(err).Error("failed check")
 			}
-			log.WithField("nodegroup", nodegroup.Name).Fatalf("There are %v problems when validating the options. Please check %v", len(errs), *nodegroupConfigFile)
+			logger.WithField("nodegroup", nodegroup.Name).Fatalf("There are %v problems when validating the options. Please check %v", len(errs), *nodegroupConfigFile)
 		}
-		log.WithField("nodegroup", nodegroup.Name).Info("Validating options: [PASS]")
-		log.WithField("nodegroup", nodegroup.Name).Infof("Registered with drymode %v", nodegroup.DryMode || *drymode)
+		logger.WithField("nodegroup", nodegroup.Name).Info("Validating options: [PASS]")
+		logger.WithField("nodegroup", nodegroup.Name).Infof("Registered with drymode %v", nodegroup.DryMode || *drymode)
 	}
 
 	return nodegroups
@@ -114,13 +115,13 @@ func setupK8SClient(kubeConfigFile *string, leaderElect *bool) kubernetes.Interf
 
 	// if the kubeConfigFile is in the cmdline args then use the out of cluster config
 	if kubeConfigFile != nil && len(*kubeConfigFile) > 0 {
-		log.Info("Using out of cluster config")
+		logger.Info("Using out of cluster config")
 		if *leaderElect {
-			log.Warn("Doing leader election out of cluster is not recommended.")
+			logger.Warn("Doing leader election out of cluster is not recommended.")
 		}
 		k8sClient = k8s.NewOutOfClusterClient(*kubeConfigFile)
 	} else {
-		log.Info("Using in cluster config")
+		logger.Info("Using in cluster config")
 		k8sClient = k8s.NewInClusterClient()
 	}
 
@@ -133,8 +134,8 @@ func awaitStopSignal(stopChan chan struct{}) {
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-signalChan
 
-	log.Infof("Signal received: %v", sig)
-	log.Info("Stopping autoscaler gracefully")
+	logger.Infof("Signal received: %v", sig)
+	logger.Info("Stopping autoscaler gracefully")
 	close(stopChan)
 }
 
@@ -143,7 +144,7 @@ func awaitLeaderDeposed(leaderContext context.Context) {
 	// so we will crash.
 	<-leaderContext.Done()
 
-	log.Fatal("Was deposed as leader, exiting.")
+	logger.Fatal("Was deposed as leader, exiting.")
 
 }
 
@@ -156,7 +157,7 @@ func startLeaderElection(client kubernetes.Interface, resourceLockID string, con
 
 	// Start events recorder and get it logging and recording.
 	eventBroadcaster := record.NewBroadcaster()
-	eventBroadcaster.StartLogging(log.Infof)
+	eventBroadcaster.StartLogging(logger.Infof)
 	eventBroadcaster.StartRecordingToSink(&clientcorev1.EventSinkImpl{Interface: clientcorev1.New(client.CoreV1().RESTClient()).Events("")})
 	recorder := eventBroadcaster.NewRecorder(eventsScheme, coreV1.EventSource{Component: "escalator"})
 
@@ -181,15 +182,17 @@ func main() {
 
 	// setup logging
 	if *loglevel < 0 || *loglevel > 5 {
-		log.Fatalf("Invalid log level %v provided. Must be between 0 (Critical) and 5 (Debug)", *loglevel)
+		fmt.Printf("Invalid log level %v provided. Must be between 0 (Critical) and 5 (Debug)\n", *loglevel)
+		os.Exit(1)
 	}
-	log.SetLevel(log.Level(*loglevel))
+	//logger.SetLevel(logrus.Level(*loglevel))
+	logger.Level = logrus.Level(*loglevel)
 
 	if *logfmt == "json" {
-		log.SetFormatter(&log.JSONFormatter{})
+		logger.Formatter = &logrus.JSONFormatter{}
 	}
 
-	log.Info("Starting with log level", log.GetLevel())
+	logger.Info("Starting with log level", logger.Level)
 
 	nodegroups := setupNodeGroups()
 	k8sClient := setupK8SClient(kubeConfigFile, leaderElect)
@@ -227,7 +230,7 @@ func main() {
 			Name:          *leaderElectConfigName,
 		})
 		if err != nil {
-			log.WithError(err).Fatal("Leader election returned an error")
+			logger.WithError(err).Fatal("Leader election returned an error")
 		}
 		go awaitLeaderDeposed(leaderContext)
 	}

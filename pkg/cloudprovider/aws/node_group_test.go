@@ -2,62 +2,70 @@ package aws
 
 import (
 	"errors"
+	"math/rand"
+	"testing"
+
 	"github.com/atlassian/escalator/pkg/test"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
+	logrus_test "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/api/core/v1"
 	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"math/rand"
-	"testing"
 )
 
 func TestNodeGroup_ID(t *testing.T) {
 	id := "nodegroup"
-	nodeGroup := NewNodeGroup(id, &autoscaling.Group{}, &CloudProvider{})
+	logger, _ := logrus_test.NewNullLogger()
+	nodeGroup := NewNodeGroup(logger, id, &autoscaling.Group{}, &CloudProvider{})
 	assert.Equal(t, id, nodeGroup.ID())
 }
 
 func TestNodeGroup_String(t *testing.T) {
-	nodeGroup := NewNodeGroup("nodegroup", &autoscaling.Group{}, &CloudProvider{})
+	logger, _ := logrus_test.NewNullLogger()
+	nodeGroup := NewNodeGroup(logger, "nodegroup", &autoscaling.Group{}, &CloudProvider{})
 	assert.IsType(t, "string", nodeGroup.String())
 }
 
 func TestNodeGroup_MinSize(t *testing.T) {
+	logger, _ := logrus_test.NewNullLogger()
 	minSize := rand.Int63()
 
 	asg := &autoscaling.Group{
 		MinSize: aws.Int64(minSize),
 	}
 
-	nodeGroup := NewNodeGroup("nodegroup", asg, &CloudProvider{})
+	nodeGroup := NewNodeGroup(logger, "nodegroup", asg, &CloudProvider{})
 	assert.Equal(t, minSize, nodeGroup.MinSize())
 }
 
 func TestNodeGroup_MaxSize(t *testing.T) {
+	logger, _ := logrus_test.NewNullLogger()
 	maxSize := rand.Int63()
 
 	asg := &autoscaling.Group{
 		MaxSize: aws.Int64(maxSize),
 	}
 
-	nodeGroup := NewNodeGroup("nodegroup", asg, &CloudProvider{})
+	nodeGroup := NewNodeGroup(logger, "nodegroup", asg, &CloudProvider{})
 	assert.Equal(t, maxSize, nodeGroup.MaxSize())
 }
 
 func TestNodeGroup_TargetSize(t *testing.T) {
 	id := "nodegroup"
 	desiredCapacity := rand.Int63()
+	logger, _ := logrus_test.NewNullLogger()
 
 	asg := &autoscaling.Group{
 		DesiredCapacity: aws.Int64(desiredCapacity),
 	}
 
-	nodeGroup := NewNodeGroup(id, asg, &CloudProvider{})
+	nodeGroup := NewNodeGroup(logger, id, asg, &CloudProvider{})
 	assert.Equal(t, desiredCapacity, nodeGroup.TargetSize())
 }
 
 func TestNodeGroup_Size(t *testing.T) {
+	logger, _ := logrus_test.NewNullLogger()
 	tests := []struct {
 		name      string
 		instances []*autoscaling.Instance
@@ -89,7 +97,7 @@ func TestNodeGroup_Size(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			asg := &autoscaling.Group{Instances: tt.instances}
-			nodeGroup := NewNodeGroup("nodegroup", asg, &CloudProvider{})
+			nodeGroup := NewNodeGroup(logger, "nodegroup", asg, &CloudProvider{})
 			assert.Equal(t, tt.expected, nodeGroup.Size())
 		})
 	}
@@ -152,6 +160,7 @@ func TestNodeGroup_IncreaseSize(t *testing.T) {
 		},
 	}
 
+	logger, _ := logrus_test.NewNullLogger()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var nodeGroupNames []string
@@ -159,7 +168,7 @@ func TestNodeGroup_IncreaseSize(t *testing.T) {
 				nodeGroupNames = append(nodeGroupNames, aws.StringValue(asg.AutoScalingGroupName))
 			}
 
-			awsCloudProvider, err := newMockCloudProvider(nodeGroupNames, &test.MockAutoscalingService{
+			awsCloudProvider, err := newMockCloudProvider(logger, nodeGroupNames, &test.MockAutoscalingService{
 				DescribeAutoScalingGroupsOutput: &autoscaling.DescribeAutoScalingGroupsOutput{
 					AutoScalingGroups: tt.autoScalingGroups,
 				},
@@ -346,6 +355,7 @@ func TestNodeGroup_DeleteNodes(t *testing.T) {
 		},
 	}
 
+	logger, _ := logrus_test.NewNullLogger()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Aggregate all of the node group names and autoscaling groups
@@ -364,7 +374,7 @@ func TestNodeGroup_DeleteNodes(t *testing.T) {
 			}
 
 			// Create the aws cloud provider
-			awsCloudProvider, err := newMockCloudProvider(nodeGroupNames, &mockAutoScalingService)
+			awsCloudProvider, err := newMockCloudProvider(logger, nodeGroupNames, &mockAutoScalingService)
 			assert.Nil(t, err)
 
 			// Delete nodes from each node group
@@ -440,6 +450,7 @@ func TestNodeGroup_DecreaseSize(t *testing.T) {
 		},
 	}
 
+	logger, _ := logrus_test.NewNullLogger()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var nodeGroupNames []string
@@ -447,7 +458,7 @@ func TestNodeGroup_DecreaseSize(t *testing.T) {
 				nodeGroupNames = append(nodeGroupNames, aws.StringValue(asg.AutoScalingGroupName))
 			}
 
-			awsCloudProvider, err := newMockCloudProvider(nodeGroupNames, &test.MockAutoscalingService{
+			awsCloudProvider, err := newMockCloudProvider(logger, nodeGroupNames, &test.MockAutoscalingService{
 				DescribeAutoScalingGroupsOutput: &autoscaling.DescribeAutoScalingGroupsOutput{
 					AutoScalingGroups: tt.autoScalingGroups,
 				},

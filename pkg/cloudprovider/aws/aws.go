@@ -8,7 +8,7 @@ import (
 	awsapi "github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
 	"github.com/aws/aws-sdk-go/service/autoscaling/autoscalingiface"
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"k8s.io/api/core/v1"
 )
 
@@ -21,6 +21,7 @@ func instanceToProviderID(instance *autoscaling.Instance) string {
 
 // CloudProvider providers an aws cloud provider implementation
 type CloudProvider struct {
+	logger     *logrus.Logger
 	service    autoscalingiface.AutoScalingAPI
 	nodeGroups map[string]*NodeGroup
 }
@@ -59,7 +60,7 @@ func (c *CloudProvider) RegisterNodeGroups(ids ...string) error {
 
 	result, err := c.service.DescribeAutoScalingGroups(input)
 	if err != nil {
-		log.Errorf("failed to describe asgs %v. err: %v", ids, err)
+		c.logger.Errorf("failed to describe asgs %v. err: %v", ids, err)
 		return err
 	}
 
@@ -72,6 +73,7 @@ func (c *CloudProvider) RegisterNodeGroups(ids ...string) error {
 		}
 
 		c.nodeGroups[id] = NewNodeGroup(
+			c.logger,
 			id,
 			group,
 			c,
@@ -101,15 +103,17 @@ func (c *CloudProvider) Refresh() error {
 
 // NodeGroup implements a aws nodegroup
 type NodeGroup struct {
-	id  string
-	asg *autoscaling.Group
+	logger *logrus.Logger
+	id     string
+	asg    *autoscaling.Group
 
 	provider *CloudProvider
 }
 
 // NewNodeGroup creates a new nodegroup from the aws group backing
-func NewNodeGroup(id string, asg *autoscaling.Group, provider *CloudProvider) *NodeGroup {
+func NewNodeGroup(logger *logrus.Logger, id string, asg *autoscaling.Group, provider *CloudProvider) *NodeGroup {
 	return &NodeGroup{
+		logger:   logger,
 		id:       id,
 		asg:      asg,
 		provider: provider,
@@ -160,7 +164,7 @@ func (n *NodeGroup) IncreaseSize(delta int64) error {
 		return fmt.Errorf("increasing size will breach maximum node size")
 	}
 
-	log.WithField("asg", n.id).Debugf("IncreaseSize: %v", delta)
+	n.logger.WithField("asg", n.id).Debugf("IncreaseSize: %v", delta)
 	return n.setASGDesiredSize(n.TargetSize() + delta)
 }
 
@@ -178,8 +182,8 @@ func (n *NodeGroup) DeleteNodes(nodes ...*v1.Node) error {
 
 	for _, node := range nodes {
 		if !n.Belongs(node) {
-			log.Debugf("instances in ASG: %v", n.Nodes())
-			return fmt.Errorf("node %v, %v belongs in a different asg than %v", node.Name, node.Spec.ProviderID, n.ID())
+			n.logger.Debugf("instances in ASG: %v", n.Nodes())
+			return &NodeNotInAutoScalingGroup{NodeName: node.Name, ProviderID: node.Spec.ProviderID, NodeGroup: n.ID()}
 		}
 
 		// find which instance this is
@@ -200,7 +204,7 @@ func (n *NodeGroup) DeleteNodes(nodes ...*v1.Node) error {
 		if err != nil {
 			return fmt.Errorf("failed to terminate instance. err: %v", err)
 		}
-		log.Debug(*result.Activity.Description)
+		n.logger.Debug(*result.Activity.Description)
 	}
 
 	return nil
@@ -233,7 +237,7 @@ func (n *NodeGroup) DecreaseTargetSize(delta int64) error {
 		return fmt.Errorf("decreasing target size will breach minimum node size")
 	}
 
-	log.WithField("asg", n.id).Debugf("DecreaseTargetSize: %v", delta)
+	n.logger.WithField("asg", n.id).Debugf("DecreaseTargetSize: %v", delta)
 	return n.setASGDesiredSize(n.TargetSize() + delta)
 }
 
@@ -256,9 +260,9 @@ func (n *NodeGroup) setASGDesiredSize(newSize int64) error {
 		HonorCooldown:        awsapi.Bool(true),
 	}
 
-	log.WithField("asg", n.id).Debugf("SetDesiredCapacity: %v", newSize)
-	log.WithField("asg", n.id).Debugf("CurrentSize: %v", n.Size())
-	log.WithField("asg", n.id).Debugf("CurrentTargetSize: %v", n.TargetSize())
+	n.logger.WithField("asg", n.id).Debugf("SetDesiredCapacity: %v", newSize)
+	n.logger.WithField("asg", n.id).Debugf("CurrentSize: %v", n.Size())
+	n.logger.WithField("asg", n.id).Debugf("CurrentTargetSize: %v", n.TargetSize())
 	_, err := n.provider.service.SetDesiredCapacity(input)
 	return err
 }

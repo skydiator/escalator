@@ -2,14 +2,14 @@ package aws
 
 import (
 	"fmt"
+	"time"
+
 	"github.com/atlassian/escalator/pkg/cloudprovider"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
-	log "github.com/sirupsen/logrus"
-	"time"
 )
 
 // Builder builds the aws cloud provider
@@ -45,6 +45,7 @@ func (b Builder) Build() (cloudprovider.CloudProvider, error) {
 	cloud := &CloudProvider{
 		service:    service,
 		nodeGroups: make(map[string]*NodeGroup, len(b.ProviderOpts.NodeGroupIDs)),
+		logger:     b.ProviderOpts.Logger,
 	}
 
 	// Register the node groups
@@ -58,7 +59,7 @@ func (b Builder) Build() (cloudprovider.CloudProvider, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Infof("aws session created successfully, using provider %v", credValue.ProviderName)
+	b.ProviderOpts.Logger.Infof("aws session created successfully, using provider %v", credValue.ProviderName)
 
 	return cloud, nil
 }

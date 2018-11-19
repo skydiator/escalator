@@ -3,6 +3,7 @@ package cloudprovider
 import (
 	"fmt"
 
+	"github.com/sirupsen/logrus"
 	"k8s.io/api/core/v1"
 )
 
@@ -81,6 +82,7 @@ type Builder interface {
 
 // BuildOpts providers all options to create your cloud provider
 type BuildOpts struct {
+	Logger       *logrus.Logger
 	ProviderID   string
 	NodeGroupIDs []string
 }

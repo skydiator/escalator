@@ -2,11 +2,13 @@ package aws
 
 import (
 	"fmt"
+	"testing"
+
 	"github.com/atlassian/escalator/pkg/test"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
+	logrus_test "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
 func TestCloudProvider_Name(t *testing.T) {
@@ -15,6 +17,7 @@ func TestCloudProvider_Name(t *testing.T) {
 }
 
 func TestCloudProvider_NodeGroups(t *testing.T) {
+	logger, _ := logrus_test.NewNullLogger()
 	tests := []struct {
 		name       string
 		nodeGroups map[string]*NodeGroup
@@ -22,14 +25,14 @@ func TestCloudProvider_NodeGroups(t *testing.T) {
 		{
 			"single node group",
 			map[string]*NodeGroup{
-				"1": NewNodeGroup("1", &autoscaling.Group{}, &CloudProvider{}),
+				"1": NewNodeGroup(logger, "1", &autoscaling.Group{}, &CloudProvider{}),
 			},
 		},
 		{
 			"multiple node groups",
 			map[string]*NodeGroup{
-				"1": NewNodeGroup("1", &autoscaling.Group{}, &CloudProvider{}),
-				"2": NewNodeGroup("2", &autoscaling.Group{}, &CloudProvider{}),
+				"1": NewNodeGroup(logger, "1", &autoscaling.Group{}, &CloudProvider{}),
+				"2": NewNodeGroup(logger, "2", &autoscaling.Group{}, &CloudProvider{}),
 			},
 		},
 		{
@@ -49,6 +52,7 @@ func TestCloudProvider_NodeGroups(t *testing.T) {
 }
 
 func TestCloudProvider_GetNodeGroup(t *testing.T) {
+	logger, _ := logrus_test.NewNullLogger()
 	tests := []struct {
 		name       string
 		nodeGroups map[string]*NodeGroup
@@ -58,7 +62,7 @@ func TestCloudProvider_GetNodeGroup(t *testing.T) {
 		{
 			"get a node group that exists",
 			map[string]*NodeGroup{
-				"1": NewNodeGroup("1", &autoscaling.Group{}, &CloudProvider{}),
+				"1": NewNodeGroup(logger, "1", &autoscaling.Group{}, &CloudProvider{}),
 			},
 			"1",
 			true,
@@ -142,6 +146,7 @@ func TestCloudProvider_RegisterNodeGroups(t *testing.T) {
 		},
 	}
 
+	logger, _ := logrus_test.NewNullLogger()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a mock autoscaling service
@@ -150,12 +155,12 @@ func TestCloudProvider_RegisterNodeGroups(t *testing.T) {
 				DescribeAutoScalingGroupsErr:    tt.err,
 			}
 
-			var ids []string
+			ids := make([]string, 0, len(tt.nodeGroups))
 			for id := range tt.nodeGroups {
 				ids = append(ids, id)
 			}
 
-			awsCloudProvider, err := newMockCloudProvider(ids, &service)
+			awsCloudProvider, err := newMockCloudProvider(logger, ids, &service)
 			assert.Equal(t, tt.err, err)
 
 			// Ensure that the node groups that are supposed to exist have been fetched and registered properly
@@ -174,6 +179,7 @@ func TestCloudProvider_Refresh(t *testing.T) {
 	nodeGroups := []string{"1"}
 	initialDesiredCapacity := int64(1)
 	updatedDesiredCapacity := int64(2)
+	logger, _ := logrus_test.NewNullLogger()
 
 	// Create the autoscaling groups output
 	var autoscalingGroups []*autoscaling.Group
@@ -187,7 +193,7 @@ func TestCloudProvider_Refresh(t *testing.T) {
 	// Create the initial response
 	resp := &autoscaling.DescribeAutoScalingGroupsOutput{AutoScalingGroups: autoscalingGroups}
 
-	awsCloudProvider, err := newMockCloudProvider(nodeGroups, &test.MockAutoscalingService{
+	awsCloudProvider, err := newMockCloudProvider(logger, nodeGroups, &test.MockAutoscalingService{
 		DescribeAutoScalingGroupsOutput: resp,
 		DescribeAutoScalingGroupsErr:    nil,
 	})
