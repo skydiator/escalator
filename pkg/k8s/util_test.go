@@ -7,7 +7,7 @@ import (
 	"github.com/atlassian/escalator/pkg/test"
 	"github.com/stretchr/testify/assert"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
@@ -127,7 +127,7 @@ func TestCalculatePodsRequestTotal(t *testing.T) {
 			*resource.NewQuantity(0, resource.DecimalSI),
 		},
 		{
-			"test mulitple containers",
+			"test multiple containers",
 			args{
 				[]*v1.Pod{p6, p7},
 			},

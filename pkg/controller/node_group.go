@@ -5,8 +5,9 @@ import (
 	"io"
 	"time"
 
+	"github.com/atlassian/escalator/pkg/cloudprovider/aws"
 	"github.com/atlassian/escalator/pkg/k8s"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	v1lister "k8s.io/client-go/listers/core/v1"
 )
@@ -40,10 +41,27 @@ type NodeGroupOptions struct {
 
 	ScaleUpCoolDownPeriod string `json:"scale_up_cool_down_period,omitempty" yaml:"scale_up_cool_down_period,omitempty"`
 
+	TaintEffect v1.TaintEffect `json:"taint_effect,omitempty" yaml:"taint_effect,omitempty"`
+
+	AWS AWSNodeGroupOptions `json:"aws" yaml:"aws"`
+
 	// Private variables for storing the parsed duration from the string
 	softDeleteGracePeriodDuration time.Duration
 	hardDeleteGracePeriodDuration time.Duration
 	scaleUpCoolDownPeriodDuration time.Duration
+}
+
+// AWSNodeGroupOptions represents a nodegroup running on a cluster that is
+// using the AWS cloud provider
+type AWSNodeGroupOptions struct {
+	LaunchTemplateID          string   `json:"launch_template_id,omitempty" yaml:"launch_template_id,omitempty"`
+	LaunchTemplateVersion     string   `json:"launch_template_version,omitempty" yaml:"launch_template_version,omitempty"`
+	FleetInstanceReadyTimeout string   `json:"fleet_instance_ready_timeout,omitempty" yaml:"fleet_instance_ready_timeout,omitempty"`
+	Lifecycle                 string   `json:"lifecycle,omitempty" yaml:"lifecycle,omitempty"`
+	InstanceTypeOverrides     []string `json:"instance_type_overrides,omitempty" yaml:"instance_type_overrides,omitempty"`
+
+	// Private variables for storing the parsed duration from the string
+	fleetInstanceReadyTimeout time.Duration
 }
 
 // UnmarshalNodeGroupOptions decodes the yaml or json reader into a struct
@@ -85,7 +103,7 @@ func ValidateNodeGroup(nodegroup NodeGroupOptions) []error {
 	if !nodegroup.autoDiscoverMinMaxNodeOptions() {
 		checkThat(nodegroup.MinNodes < nodegroup.MaxNodes, "min_nodes must be less than max_nodes")
 		checkThat(nodegroup.MaxNodes > 0, "max_nodes must be larger than 0")
-		checkThat(nodegroup.MinNodes > 0, "min_nodes must be larger than 0")
+		checkThat(nodegroup.MinNodes >= 0, "min_nodes must be not less than 0")
 	}
 
 	checkThat(nodegroup.SlowNodeRemovalRate <= nodegroup.FastNodeRemovalRate, "slow_node_removal_rate must be less than fast_node_removal_rate")
@@ -100,7 +118,20 @@ func ValidateNodeGroup(nodegroup NodeGroupOptions) []error {
 	checkThat(len(nodegroup.ScaleUpCoolDownPeriod) > 0, "scale_up_cool_down_period must not be empty")
 	checkThat(nodegroup.ScaleUpCoolDownPeriodDuration() > 0, "soft_delete_grace_period failed to parse into a time.Duration. check your formatting.")
 
+	checkThat(validTaintEffect(nodegroup.TaintEffect), "taint_effect must be valid kubernetes taint")
+
+	checkThat(validAWSLifecycle(nodegroup.AWS.Lifecycle), "aws.lifecycle must be '%v' or '%v' if provided.", aws.LifecycleOnDemand, aws.LifecycleSpot)
 	return problems
+}
+
+// Lifecycle must be either on-demand or spot if it's provided. An empty string is allowed to preserve backwards compatibility
+func validAWSLifecycle(lifecycle string) bool {
+	return len(lifecycle) == 0 || lifecycle == aws.LifecycleOnDemand || lifecycle == aws.LifecycleSpot
+}
+
+// Empty String is valid value for TaintEffect as AddToBeRemovedTaint method will default to NoSchedule
+func validTaintEffect(taintEffect v1.TaintEffect) bool {
+	return len(taintEffect) == 0 || k8s.TaintEffectTypes[taintEffect]
 }
 
 // SoftDeleteGracePeriodDuration lazily returns/parses the softDeleteGracePeriod string into a duration
@@ -147,6 +178,21 @@ func (n *NodeGroupOptions) autoDiscoverMinMaxNodeOptions() bool {
 	return n.MinNodes == 0 && n.MaxNodes == 0
 }
 
+// FleetInstanceReadyTimeoutDuration lazily returns/parses the fleetInstanceReadyTimeout string into a duration
+func (n *AWSNodeGroupOptions) FleetInstanceReadyTimeoutDuration() time.Duration {
+	if n.fleetInstanceReadyTimeout == 0 && n.FleetInstanceReadyTimeout != "" {
+		duration, err := time.ParseDuration(n.FleetInstanceReadyTimeout)
+		if err != nil {
+			return 0
+		}
+		n.fleetInstanceReadyTimeout = duration
+	} else if n.fleetInstanceReadyTimeout == 0 && n.FleetInstanceReadyTimeout == "" {
+		n.fleetInstanceReadyTimeout = 1 * time.Minute
+	}
+
+	return n.fleetInstanceReadyTimeout
+}
+
 // NodeGroupLister is just a light wrapper around a pod lister and node lister
 // Used for grouping a nodegroup and their listers
 type NodeGroupLister struct {
@@ -154,6 +200,17 @@ type NodeGroupLister struct {
 	Pods k8s.PodLister
 	// Node lister
 	Nodes k8s.NodeLister
+}
+
+// unwrapNodeSelectorTerms is a helper to safely get the NodeSelectorTerms array from a pod
+// returns nil slice if not exists
+func unwrapNodeSelectorTerms(pod *v1.Pod) []v1.NodeSelectorTerm {
+	if pod.Spec.Affinity != nil &&
+		pod.Spec.Affinity.NodeAffinity != nil &&
+		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		return pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+	}
+	return nil
 }
 
 // NewPodAffinityFilterFunc creates a new PodFilterFunc based on filtering by label selectors
@@ -172,16 +229,18 @@ func NewPodAffinityFilterFunc(labelKey, labelValue string) k8s.PodFilterFunc {
 		}
 
 		// finally, if the pod has an affinity for our selector then we will include it
-		if pod.Spec.Affinity != nil && pod.Spec.Affinity.NodeAffinity != nil && pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
-			if pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms != nil {
-				for _, term := range pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
-					for _, expression := range term.MatchExpressions {
-						if expression.Key == labelKey {
-							for _, value := range expression.Values {
-								if value == labelValue {
-									return true
-								}
-							}
+		for _, term := range unwrapNodeSelectorTerms(pod) {
+			for _, expression := range term.MatchExpressions {
+				// this is the key we're looking for
+				if expression.Key != labelKey {
+					continue
+				}
+				// perform the appropriate match for the expression operator
+				// we only support In
+				if expression.Operator == v1.NodeSelectorOpIn {
+					for _, value := range expression.Values {
+						if value == labelValue {
+							return true
 						}
 					}
 				}

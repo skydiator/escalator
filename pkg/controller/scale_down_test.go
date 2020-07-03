@@ -8,7 +8,7 @@ import (
 	"github.com/atlassian/escalator/pkg/k8s"
 	"github.com/atlassian/escalator/pkg/test"
 	"github.com/stretchr/testify/assert"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 )
 
 func TestControllerScaleDownTaint(t *testing.T) {
@@ -42,8 +42,14 @@ func TestControllerScaleDownTaint(t *testing.T) {
 
 	nodeGroups := []NodeGroupOptions{
 		{
-			Name:     "buildeng",
+			Name:     "example",
 			MinNodes: 3,
+			MaxNodes: 6,
+			DryMode:  false,
+		},
+		{
+			Name:     "default",
+			MinNodes: 0,
 			MaxNodes: 6,
 			DryMode:  false,
 		},
@@ -81,7 +87,7 @@ func TestControllerScaleDownTaint(t *testing.T) {
 					nodes,
 					[]*v1.Node{},
 					nodes,
-					nodeGroupsState["buildeng"],
+					nodeGroupsState["example"],
 					2,
 				},
 			},
@@ -90,13 +96,13 @@ func TestControllerScaleDownTaint(t *testing.T) {
 			"",
 		},
 		{
-			"test try taint 4, min nodes = 3",
+			"test try taint 4, min nodes = 3, total nodes = 6",
 			args{
 				scaleOpts{
 					nodes,
 					[]*v1.Node{},
 					nodes,
-					nodeGroupsState["buildeng"],
+					nodeGroupsState["example"],
 					4,
 				},
 			},
@@ -105,19 +111,49 @@ func TestControllerScaleDownTaint(t *testing.T) {
 			"",
 		},
 		{
-			"test try taint 4, min nodes = 3",
+			"test try taint 4, min nodes = 3, total nodes = 2",
 			args{
 				scaleOpts{
 					nodes[:2],
 					[]*v1.Node{},
 					nodes[:2],
-					nodeGroupsState["buildeng"],
+					nodeGroupsState["example"],
 					4,
 				},
 			},
 			0,
 			true,
 			"the number of nodes(2) is less than specified minimum of 3. Taking no action",
+		},
+		{
+			"test try taint 4, min nodes = 0, total nodes = 3",
+			args{
+				scaleOpts{
+					nodes[:3],
+					[]*v1.Node{},
+					nodes[:3],
+					nodeGroupsState["default"],
+					4,
+				},
+			},
+			3,
+			false,
+			"",
+		},
+		{
+			"test try taint 4, min nodes = 0, total nodes = 6",
+			args{
+				scaleOpts{
+					nodes,
+					[]*v1.Node{},
+					nodes,
+					nodeGroupsState["default"],
+					4,
+				},
+			},
+			4,
+			false,
+			"",
 		},
 	}
 	for _, tt := range tests {
@@ -144,7 +180,7 @@ func TestControllerScaleDownTaint(t *testing.T) {
 					<-updateChan
 				}
 			}
-			nodeGroupsState["buildeng"].taintTracker = nil
+			nodeGroupsState["example"].taintTracker = nil
 		})
 	}
 }
@@ -180,7 +216,7 @@ func TestControllerTaintOldestN(t *testing.T) {
 
 	nodeGroups := []NodeGroupOptions{
 		{
-			Name:     "buildeng",
+			Name:     "example",
 			MinNodes: 1,
 			MaxNodes: 5,
 			DryMode:  false,
@@ -215,7 +251,7 @@ func TestControllerTaintOldestN(t *testing.T) {
 			"first 3 nodes. taint 3",
 			args{
 				nodes[:3],
-				nodeGroupsState["buildeng"],
+				nodeGroupsState["example"],
 				3,
 			},
 			[]int{1, 2, 0},
@@ -224,7 +260,7 @@ func TestControllerTaintOldestN(t *testing.T) {
 			"first 3 nodes. taint 2",
 			args{
 				nodes[:3],
-				nodeGroupsState["buildeng"],
+				nodeGroupsState["example"],
 				2,
 			},
 			[]int{1, 2},
@@ -233,7 +269,7 @@ func TestControllerTaintOldestN(t *testing.T) {
 			"6 nodes. taint 0",
 			args{
 				nodes,
-				nodeGroupsState["buildeng"],
+				nodeGroupsState["example"],
 				0,
 			},
 			[]int{},
@@ -242,7 +278,7 @@ func TestControllerTaintOldestN(t *testing.T) {
 			"6 nodes. taint 2",
 			args{
 				nodes,
-				nodeGroupsState["buildeng"],
+				nodeGroupsState["example"],
 				2,
 			},
 			[]int{4, 5},
@@ -251,7 +287,7 @@ func TestControllerTaintOldestN(t *testing.T) {
 			"6 nodes. taint 6",
 			args{
 				nodes,
-				nodeGroupsState["buildeng"],
+				nodeGroupsState["example"],
 				6,
 			},
 			[]int{4, 5, 1, 2, 0, 3},
@@ -260,7 +296,7 @@ func TestControllerTaintOldestN(t *testing.T) {
 			"6 nodes. taint 5",
 			args{
 				nodes,
-				nodeGroupsState["buildeng"],
+				nodeGroupsState["example"],
 				5,
 			},
 			[]int{4, 5, 1, 2, 0},
@@ -269,7 +305,7 @@ func TestControllerTaintOldestN(t *testing.T) {
 			"6 nodes. taint 7",
 			args{
 				nodes,
-				nodeGroupsState["buildeng"],
+				nodeGroupsState["example"],
 				7,
 			},
 			[]int{4, 5, 1, 2, 0, 3},
@@ -278,7 +314,7 @@ func TestControllerTaintOldestN(t *testing.T) {
 			"4 nodes. taint 1",
 			args{
 				nodes[:4],
-				nodeGroupsState["buildeng"],
+				nodeGroupsState["example"],
 				1,
 			},
 			[]int{1},
@@ -294,9 +330,7 @@ func TestControllerTaintOldestN(t *testing.T) {
 			}
 			// test wet mode
 			c.Opts.DryMode = false
-			assert.NoError(t, k8s.BeginTaintFailSafe(len(tt.want)))
 			got := c.taintOldestN(tt.args.nodes, tt.args.nodeGroup, tt.args.n)
-			assert.NoError(t, k8s.EndTaintFailSafe(len(got)))
 			eq := assert.Equal(t, tt.want, got)
 			if eq {
 				for _, i := range got {
@@ -312,10 +346,8 @@ func TestControllerTaintOldestN(t *testing.T) {
 			}
 
 			// test dry mode
-			assert.NoError(t, k8s.BeginTaintFailSafe(len(tt.want)))
 			c.Opts.DryMode = true
 			got = c.taintOldestN(tt.args.nodes, tt.args.nodeGroup, tt.args.n)
-			assert.NoError(t, k8s.EndTaintFailSafe(len(got)))
 			assert.Equal(t, tt.want, got)
 
 			// untaint all
@@ -325,11 +357,146 @@ func TestControllerTaintOldestN(t *testing.T) {
 					<-updateChan
 				}
 			}
-			nodeGroupsState["buildeng"].taintTracker = nil
+			nodeGroupsState["example"].taintTracker = nil
 		})
 	}
 }
 
 func TestControllerScaleDown(t *testing.T) {
 	t.Skip("test not implemented")
+}
+
+func TestController_TryRemoveTaintedNodes(t *testing.T) {
+
+	minNodes := 10
+	maxNodes := 20
+	nodeGroup := NodeGroupOptions{
+		Name:                    "default",
+		CloudProviderGroupName:  "default",
+		MinNodes:                minNodes,
+		MaxNodes:                maxNodes,
+		ScaleUpThresholdPercent: 100,
+	}
+	nodeGroups := []NodeGroupOptions{nodeGroup}
+
+	nodes := test.BuildTestNodes(10, test.NodeOpts{
+		CPU:     1000,
+		Mem:     1000,
+		Tainted: true,
+	})
+
+	pods := buildTestPods(10, 1000, 1000)
+	client, opts := buildTestClient(nodes, pods, nodeGroups, ListerOptions{})
+
+	// For these test cases we only use 1 node group/cloud provider node group
+	nodeGroupSize := 1
+
+	// Create a test (mock) cloud provider
+	testCloudProvider := test.NewCloudProvider(nodeGroupSize)
+	testNodeGroup := test.NewNodeGroup(
+		nodeGroup.CloudProviderGroupName,
+		nodeGroup.Name,
+		int64(minNodes),
+		int64(maxNodes),
+		int64(len(nodes)),
+	)
+
+	testCloudProvider.RegisterNodeGroup(testNodeGroup)
+
+	// Create a node group state with the mapping of node groups to the cloud providers node groups
+	nodeGroupsState := BuildNodeGroupsState(nodeGroupsStateOpts{
+		nodeGroups: nodeGroups,
+		client:     *client,
+	})
+
+	nodeGroupsState[testNodeGroup.ID()].NodeInfoMap = k8s.CreateNodeNameToInfoMap(pods, nodes)
+
+	c := &Controller{
+		Client:        client,
+		Opts:          opts,
+		stopChan:      nil,
+		nodeGroups:    nodeGroupsState,
+		cloudProvider: testCloudProvider,
+	}
+
+	// taint the oldest N according to the controller
+	taintedIndex := c.taintOldestN(nodes, nodeGroupsState[testNodeGroup.ID()], 2)
+	assert.Equal(t, len(taintedIndex), 2)
+
+	// add the untainted the the untainted list
+	taintedNodes := []*v1.Node{nodes[taintedIndex[0]], nodes[taintedIndex[1]]}
+	var untaintedNodes []*v1.Node
+	for i, n := range nodes {
+		if n == taintedNodes[0] || n == taintedNodes[1] {
+			continue
+		}
+
+		untaintedNodes = append(untaintedNodes, nodes[i])
+	}
+	assert.Equal(t, len(nodes)-2, len(untaintedNodes))
+
+	tests := []struct {
+		name                 string
+		opts                 scaleOpts
+		annotateFirstTainted bool
+		want                 int
+		wantErr              bool
+	}{
+		{
+			"test normal delete all tainted",
+			scaleOpts{
+				nodes,
+				taintedNodes,
+				untaintedNodes,
+				nodeGroupsState[testNodeGroup.ID()],
+				0, // not used in TryRemoveTaintedNodes
+			},
+			false,
+			-2,
+			false,
+		},
+		{
+			"test normal skip first tainted",
+			scaleOpts{
+				nodes,
+				taintedNodes,
+				untaintedNodes,
+				nodeGroupsState[testNodeGroup.ID()],
+				0, // not used in TryRemoveTaintedNodes
+			},
+			true,
+			-1,
+			false,
+		},
+		{
+			"test none tainted",
+			scaleOpts{
+				nodes,
+				[]*v1.Node{},
+				nodes,
+				nodeGroupsState[testNodeGroup.ID()],
+				0, // not used in TryRemoveTaintedNodes
+			},
+			false,
+			0,
+			false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.annotateFirstTainted {
+				tt.opts.taintedNodes[0].Annotations = map[string]string{
+					NodeEscalatorIgnoreAnnotation: "skip for testing",
+				}
+			}
+			got, err := c.TryRemoveTaintedNodes(tt.opts)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }

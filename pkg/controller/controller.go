@@ -7,11 +7,12 @@ import (
 	"github.com/atlassian/escalator/pkg/cloudprovider"
 	"github.com/atlassian/escalator/pkg/k8s"
 	"github.com/atlassian/escalator/pkg/metrics"
+
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/kubernetes/pkg/scheduler/cache"
 )
 
 // Controller contains the core logic of the Autoscaler
@@ -27,7 +28,7 @@ type Controller struct {
 type NodeGroupState struct {
 	*NodeGroupLister
 	Opts        NodeGroupOptions
-	NodeInfoMap map[string]*cache.NodeInfo
+	NodeInfoMap map[string]*k8s.NodeInfo
 	scaleUpLock scaleLock
 
 	// used for tracking which nodes are tainted. testing when in dry mode
@@ -36,6 +37,10 @@ type NodeGroupState struct {
 	// used for tracking scale delta across runs, useful for reducing hysteresis
 	scaleDelta   int
 	lastScaleOut time.Time
+
+	// used for storing cached instance capacity
+	cpuCapacity resource.Quantity
+	memCapacity resource.Quantity
 }
 
 // Opts provide the Controller with config for runtime
@@ -112,7 +117,7 @@ func (c *Controller) dryMode(nodeGroup *NodeGroupState) bool {
 }
 
 // filterNodes separates nodes between tainted and untainted nodes
-func (c *Controller) filterNodes(nodeGroup *NodeGroupState, allNodes []*v1.Node) (untaintedNodes []*v1.Node, taintedNodes []*v1.Node, cordonedNodes []*v1.Node) {
+func (c *Controller) filterNodes(nodeGroup *NodeGroupState, allNodes []*v1.Node) (untaintedNodes, taintedNodes, cordonedNodes []*v1.Node) {
 	untaintedNodes = make([]*v1.Node, 0, len(allNodes))
 	taintedNodes = make([]*v1.Node, 0, len(allNodes))
 	cordonedNodes = make([]*v1.Node, 0, len(allNodes))
@@ -152,7 +157,7 @@ func (c *Controller) filterNodes(nodeGroup *NodeGroupState, allNodes []*v1.Node)
 func (c *Controller) calculateNewNodeMetrics(nodegroup string, nodeGroup *NodeGroupState) {
 	// If we are not locked, we're either init or after a scale event
 	// If the last scale event was a scale out; i.e. nodesDelta > 0
-	// Calculate the k8s registration latencey from cloud provider
+	// Calculate the k8s registration latency from cloud provider
 	// resource instantiation
 
 	// Concerned about:
@@ -172,7 +177,7 @@ func (c *Controller) calculateNewNodeMetrics(nodegroup string, nodeGroup *NodeGr
 					nodeRegistrationLag := nodeRegTime.Sub(instance.InstantiationTime())
 					log.Debugf("Delta between node instantiation time and node registration: %v - %v", key, nodeRegistrationLag)
 					metrics.NodeGroupNodeRegistrationLag.WithLabelValues(nodegroup).Observe(nodeRegistrationLag.Seconds())
-					countNewNodes += 1
+					countNewNodes++
 				}
 			}
 		}
@@ -199,6 +204,12 @@ func (c *Controller) scaleNodeGroup(nodegroup string, nodeGroup *NodeGroupState)
 		return 0, err
 	}
 
+	// store a cached version of node capacity
+	if len(allNodes) > 0 {
+		nodeGroup.cpuCapacity = *allNodes[0].Status.Allocatable.Cpu()
+		nodeGroup.memCapacity = *allNodes[0].Status.Allocatable.Memory()
+	}
+
 	// Filter into untainted and tainted nodes
 	untaintedNodes, taintedNodes, cordonedNodes := c.filterNodes(nodeGroup, allNodes)
 
@@ -218,11 +229,12 @@ func (c *Controller) scaleNodeGroup(nodegroup string, nodeGroup *NodeGroupState)
 
 	// We want to be really simple right now so we don't do anything if we are outside the range of allowed nodes
 	// We assume it is a config error or something bad has gone wrong in the cluster
-	if len(allNodes) == 0 {
-		err = errors.New("no nodes remaining")
-		log.WithField("nodegroup", nodegroup).Warning(err.Error())
-		return 0, err
+
+	if len(allNodes) == 0 && len(pods) == 0 {
+		log.WithField("nodegroup", nodegroup).Info("no pods requests and remain 0 node for node group")
+		return 0, nil
 	}
+
 	if len(allNodes) < nodeGroup.Opts.MinNodes {
 		err = errors.New("node count less than the minimum")
 		log.WithField("nodegroup", nodegroup).Warningf(
@@ -252,6 +264,7 @@ func (c *Controller) scaleNodeGroup(nodegroup string, nodeGroup *NodeGroupState)
 		log.Errorf("Failed to calculate requests: %v", err)
 		return 0, err
 	}
+
 	memCapacity, cpuCapacity, err := k8s.CalculateNodesCapacityTotal(untaintedNodes)
 	if err != nil {
 		log.Errorf("Failed to calculate capacity: %v", err)
@@ -268,9 +281,11 @@ func (c *Controller) scaleNodeGroup(nodegroup string, nodeGroup *NodeGroupState)
 	if len(untaintedNodes) < nodeGroup.Opts.MinNodes {
 		log.WithField("nodegroup", nodegroup).Warn("There are less untainted nodes than the minimum")
 		result, err := c.ScaleUp(scaleOpts{
-			nodes:      allNodes,
-			nodesDelta: nodeGroup.Opts.MinNodes - len(untaintedNodes),
-			nodeGroup:  nodeGroup,
+			nodes:          allNodes,
+			nodesDelta:     nodeGroup.Opts.MinNodes - len(untaintedNodes),
+			nodeGroup:      nodeGroup,
+			taintedNodes:   taintedNodes,
+			untaintedNodes: untaintedNodes,
 		})
 		if err != nil {
 			log.WithField("nodegroup", nodegroup).Error(err)
@@ -279,7 +294,9 @@ func (c *Controller) scaleNodeGroup(nodegroup string, nodeGroup *NodeGroupState)
 	}
 
 	// Calc %
-	cpuPercent, memPercent, err := calcPercentUsage(cpuRequest, memRequest, cpuCapacity, memCapacity)
+	// both cpu and memory capacity are based on number of untainted nodes
+	// pass number of untainted nodes in to help make decision if it's a scaling-up-from-0
+	cpuPercent, memPercent, err := calcPercentUsage(cpuRequest, memRequest, cpuCapacity, memCapacity, int64(len(untaintedNodes)))
 	if err != nil {
 		log.Errorf("Failed to calculate percentages: %v", err)
 		return 0, err
@@ -287,8 +304,15 @@ func (c *Controller) scaleNodeGroup(nodegroup string, nodeGroup *NodeGroupState)
 
 	// Metrics
 	log.WithField("nodegroup", nodegroup).Infof("cpu: %v, memory: %v", cpuPercent, memPercent)
-	metrics.NodeGroupsCPUPercent.WithLabelValues(nodegroup).Set(cpuPercent)
-	metrics.NodeGroupsMemPercent.WithLabelValues(nodegroup).Set(memPercent)
+
+	// on the case that we're scaling up from 0, emit 0 as the metrics to keep metrics sane
+	if cpuPercent == math.MaxFloat64 || memPercent == math.MaxFloat64 {
+		metrics.NodeGroupsCPUPercent.WithLabelValues(nodegroup).Set(0)
+		metrics.NodeGroupsMemPercent.WithLabelValues(nodegroup).Set(0)
+	} else {
+		metrics.NodeGroupsCPUPercent.WithLabelValues(nodegroup).Set(cpuPercent)
+		metrics.NodeGroupsMemPercent.WithLabelValues(nodegroup).Set(memPercent)
+	}
 
 	locked := nodeGroup.scaleUpLock.locked()
 	if locked {
@@ -319,7 +343,7 @@ func (c *Controller) scaleNodeGroup(nodegroup string, nodeGroup *NodeGroupState)
 		// if ScaleUpThresholdPercent is our "max target" or "slack capacity"
 		// we want to add enough nodes such that the maxPercentage cluster util
 		// drops back below ScaleUpThresholdPercent
-		nodesDelta, err = calcScaleUpDelta(untaintedNodes, cpuPercent, memPercent, nodeGroup)
+		nodesDelta, err = calcScaleUpDelta(untaintedNodes, cpuPercent, memPercent, cpuRequest, memRequest, nodeGroup)
 		if err != nil {
 			log.Errorf("Failed to calculate node delta: %v", err)
 			return nodesDelta, err
@@ -395,7 +419,7 @@ func (c *Controller) RunOnce() error {
 		// Double check if node group still exists from the cloud provider then retrieve the latest stat
 		cloudProviderNodeGroup, ok := c.cloudProvider.GetNodeGroup(nodeGroupOpts.CloudProviderGroupName)
 		if !ok {
-			err = errors.New("could not find node group!")
+			err = errors.New("could not find node group")
 			return err
 		}
 		// Update the min_nodes and max_nodes based on the latest value from the cloud provider

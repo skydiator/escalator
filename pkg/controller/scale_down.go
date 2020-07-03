@@ -9,7 +9,14 @@ import (
 	"github.com/atlassian/escalator/pkg/metrics"
 	log "github.com/sirupsen/logrus"
 	time "github.com/stephanos/clock"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
+)
+
+const (
+	// NodeEscalatorIgnoreAnnotation is the key of an annotation on a node that signifies it should be ignored from ASG deletion
+	// value does not matter, can be used for reason, as long as not empty
+	// if set, the node wil not be deleted. However it still can be tainted and factored into calculations
+	NodeEscalatorIgnoreAnnotation = "atlassian.com/no-delete"
 )
 
 // ScaleDown performs the taint and remove node logic
@@ -29,10 +36,30 @@ func (c *Controller) ScaleDown(opts scaleOpts) (int, error) {
 	return c.scaleDownTaint(opts)
 }
 
-// TryRemoveTaintedNodes attempts to remove nodes are tainted and empty or have passed their grace period
+func safeFromDeletion(node *v1.Node) (string, bool) {
+	for key, val := range node.ObjectMeta.Annotations {
+		if key == NodeEscalatorIgnoreAnnotation && val != "" {
+			return val, true
+		}
+	}
+	return "", false
+}
+
+// TryRemoveTaintedNodes attempts to remove nodes are
+// * tainted and empty
+// * have passed their grace period
 func (c *Controller) TryRemoveTaintedNodes(opts scaleOpts) (int, error) {
 	var toBeDeleted []*v1.Node
 	for _, candidate := range opts.taintedNodes {
+
+		// skip any nodes marked with the NodeEscalatorIgnore condition which is true
+		// filter these nodes out as late as possible to ensure rest of escalator scaling calculations remain unaffected
+		// This is because the nodes still exist and use resources, we don't want any inconsistencies. This node is safe from deletion not tainting
+		if why, ok := safeFromDeletion(candidate); ok {
+			log.Infof("node %s has escalator ignore annotation %s: Reason: %s. Removing from deletion options", candidate.Name, NodeEscalatorIgnoreAnnotation, why)
+			continue
+		}
+
 		// if the time the node was tainted is larger than the hard period then it is deleted no matter what
 		// if the soft time is passed and the node is empty (excluding daemonsets) then it can be deleted
 		taintedTime, err := k8s.GetToBeRemovedTime(candidate)
@@ -51,7 +78,7 @@ func (c *Controller) TryRemoveTaintedNodes(opts scaleOpts) (int, error) {
 				}
 			} else {
 				nodePodsRemaining, ok := k8s.NodePodsRemaining(candidate, opts.nodeGroup.NodeInfoMap)
-				podsRemainingMessage := ""
+				var podsRemainingMessage string
 				if ok {
 					podsRemainingMessage = fmt.Sprintf("%d pods remaining", nodePodsRemaining)
 				} else {
@@ -78,7 +105,6 @@ func (c *Controller) TryRemoveTaintedNodes(opts scaleOpts) (int, error) {
 			if !ok {
 				continue
 			}
-
 			podsRemaining += nodePodsRemaining
 		}
 
@@ -117,6 +143,7 @@ func (c *Controller) scaleDownTaint(opts scaleOpts) (int, error) {
 	if len(opts.untaintedNodes)-nodesToRemove < opts.nodeGroup.Opts.MinNodes {
 		// Set the delta to maximum amount we can remove without going over
 		nodesToRemove = len(opts.untaintedNodes) - opts.nodeGroup.Opts.MinNodes
+
 		log.Infof("untainted nodes close to minimum (%v). Adjusting taint amount to (%v)", opts.nodeGroup.Opts.MinNodes, nodesToRemove)
 		// If have less node than the minimum, abort!
 		if nodesToRemove < 0 {
@@ -132,20 +159,8 @@ func (c *Controller) scaleDownTaint(opts scaleOpts) (int, error) {
 
 	log.WithField("nodegroup", nodegroupName).Infof("Scaling Down: tainting %v nodes", nodesToRemove)
 	metrics.NodeGroupTaintEvent.WithLabelValues(nodegroupName).Add(float64(nodesToRemove))
-
-	// Lock the tainting to a maximum on 10 nodes
-	if err := k8s.BeginTaintFailSafe(nodesToRemove); err != nil {
-		// Don't taint if there was an error on the lock
-		log.Errorf("Failed to get safety lock on tainter: %v", err)
-		return 0, err
-	}
 	// Perform the tainting loop with the fail safe around it
 	tainted := c.taintOldestN(opts.untaintedNodes, opts.nodeGroup, nodesToRemove)
-	// Validate the fail-safe worked
-	if err := k8s.EndTaintFailSafe(len(tainted)); err != nil {
-		log.Errorf("Failed to validate safety lock on tainter: %v", err)
-		return len(tainted), err
-	}
 
 	log.Infof("Tainted a total of %v nodes", len(tainted))
 	return len(tainted), nil
@@ -161,9 +176,9 @@ func (c *Controller) taintOldestN(nodes []*v1.Node, nodeGroup *NodeGroupState, n
 	sort.Sort(sorted)
 
 	taintedIndices := make([]int, 0, n)
-	for i, bundle := range sorted {
+	for _, bundle := range sorted {
 		// stop at N (or when array is fully iterated)
-		if len(taintedIndices) >= n || i >= k8s.MaximumTaints {
+		if len(taintedIndices) >= n {
 			break
 		}
 
@@ -172,7 +187,7 @@ func (c *Controller) taintOldestN(nodes []*v1.Node, nodeGroup *NodeGroupState, n
 			log.WithField("drymode", "off").Infof("Tainting node %v", bundle.node.Name)
 
 			// Taint the node
-			updatedNode, err := k8s.AddToBeRemovedTaint(bundle.node, c.Client)
+			updatedNode, err := k8s.AddToBeRemovedTaint(bundle.node, c.Client, nodeGroup.Opts.TaintEffect)
 			if err != nil {
 				log.Errorf("While tainting %v: %v", bundle.node.Name, err)
 			} else {
@@ -181,7 +196,6 @@ func (c *Controller) taintOldestN(nodes []*v1.Node, nodeGroup *NodeGroupState, n
 			}
 		} else {
 			nodeGroup.taintTracker = append(nodeGroup.taintTracker, bundle.node.Name)
-			k8s.IncrementTaintCount()
 			taintedIndices = append(taintedIndices, bundle.index)
 			log.WithField("drymode", "on").Infof("Tainting node %v", bundle.node.Name)
 		}

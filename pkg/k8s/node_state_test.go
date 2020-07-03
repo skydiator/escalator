@@ -1,11 +1,12 @@
 package k8s
 
 import (
-	"github.com/atlassian/escalator/pkg/test"
-	"github.com/stretchr/testify/assert"
-	"k8s.io/api/core/v1"
-	"k8s.io/kubernetes/pkg/scheduler/cache"
 	"testing"
+
+	"github.com/atlassian/escalator/pkg/test"
+
+	"github.com/stretchr/testify/assert"
+	v1 "k8s.io/api/core/v1"
 )
 
 func TestCreateNodeNameToInfoMap(t *testing.T) {
@@ -60,7 +61,7 @@ func TestCreateNodeNameToInfoMap(t *testing.T) {
 			var validPodCount int
 			for _, pod := range tt.args.pods {
 				if _, ok := nodeInfo[pod.Spec.NodeName]; ok {
-					validPodCount += 1
+					validPodCount++
 				}
 			}
 
@@ -159,7 +160,7 @@ func TestNodeEmpty(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var nodeInfo map[string]*cache.NodeInfo
+			var nodeInfo map[string]*NodeInfo
 			if !tt.args.emptyNodeInfo {
 				nodeInfo = CreateNodeNameToInfoMap(tt.args.pods, tt.args.nodes)
 			}
@@ -271,7 +272,7 @@ func TestNodePodsRemaining(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var nodeInfo map[string]*cache.NodeInfo
+			var nodeInfo map[string]*NodeInfo
 			if !tt.args.emptyNodeInfo {
 				nodeInfo = CreateNodeNameToInfoMap(tt.args.pods, tt.args.nodes)
 			}

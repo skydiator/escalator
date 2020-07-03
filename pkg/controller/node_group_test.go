@@ -1,22 +1,23 @@
 package controller
 
 import (
-	"github.com/atlassian/escalator/pkg/test"
-	"github.com/stretchr/testify/assert"
-	"k8s.io/api/core/v1"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/atlassian/escalator/pkg/test"
+	"github.com/stretchr/testify/assert"
+	v1 "k8s.io/api/core/v1"
 )
 
 func TestNewPodLabelFilterFunc(t *testing.T) {
-	buildengPod := test.BuildTestPod(test.PodOpts{
+	examplePod := test.BuildTestPod(test.PodOpts{
 		NodeSelectorKey:   "customer",
-		NodeSelectorValue: "buildeng",
+		NodeSelectorValue: "example",
 	})
 	badKeyPod := test.BuildTestPod(test.PodOpts{
 		NodeSelectorKey:   "wronglabelkey",
-		NodeSelectorValue: "buildeng",
+		NodeSelectorValue: "example",
 	})
 	badLabelPod := test.BuildTestPod(test.PodOpts{
 		NodeSelectorKey:   "customer",
@@ -28,12 +29,17 @@ func TestNewPodLabelFilterFunc(t *testing.T) {
 	})
 	daemonSet := test.BuildTestPod(test.PodOpts{
 		NodeSelectorKey:   "customer",
-		NodeSelectorValue: "buildeng",
+		NodeSelectorValue: "example",
 		Owner:             "DaemonSet",
 	})
 	affinity := test.BuildTestPod(test.PodOpts{
 		NodeAffinityKey:   "customer",
-		NodeAffinityValue: "buildeng",
+		NodeAffinityValue: "example",
+	})
+	affinityIncorrectOp := test.BuildTestPod(test.PodOpts{
+		NodeAffinityKey:   "customer",
+		NodeAffinityValue: "example",
+		NodeAffinityOp:    v1.NodeSelectorOpNotIn,
 	})
 
 	type args struct {
@@ -47,46 +53,46 @@ func TestNewPodLabelFilterFunc(t *testing.T) {
 		want bool
 	}{
 		{
-			"buildeng customer should pass",
+			"example customer should pass",
 			args{
 				"customer",
-				"buildeng",
-				buildengPod,
+				"example",
+				examplePod,
 			},
 			true,
 		},
 		{
-			"buildeng customer should fail",
+			"example customer should fail",
 			args{
 				"customer",
 				"kitt",
-				buildengPod,
+				examplePod,
 			},
 			false,
 		},
 		{
-			"buildeng wrong key should fail",
+			"example wrong key should fail",
 			args{
 				"customer",
-				"buildeng",
+				"example",
 				badKeyPod,
 			},
 			false,
 		},
 		{
-			"buildeng wrong value should fail",
+			"example wrong value should fail",
 			args{
 				"customer",
-				"buildeng",
+				"example",
 				badLabelPod,
 			},
 			false,
 		},
 		{
-			"buildeng bad both should fail",
+			"example bad both should fail",
 			args{
 				"customer",
-				"buildeng",
+				"example",
 				badBothPod,
 			},
 			false,
@@ -95,26 +101,35 @@ func TestNewPodLabelFilterFunc(t *testing.T) {
 			"daemonset should be false",
 			args{
 				"customer",
-				"buildeng",
+				"example",
 				daemonSet,
 			},
 			false,
 		},
 		{
-			"correct affinty should be true",
+			"correct affinity should be true",
 			args{
 				"customer",
-				"buildeng",
+				"example",
 				affinity,
 			},
 			true,
 		},
 		{
-			"wrong affinty should be false",
+			"wrong affinity should be false",
 			args{
 				"customer",
 				"shared",
 				affinity,
+			},
+			false,
+		},
+		{
+			"correct affinity wrong operator should be false",
+			args{
+				"customer",
+				"shared",
+				affinityIncorrectOp,
 			},
 			false,
 		},
@@ -129,9 +144,9 @@ func TestNewPodLabelFilterFunc(t *testing.T) {
 }
 
 func TestNewPodDefaultFilterFunc(t *testing.T) {
-	buildengPod := test.BuildTestPod(test.PodOpts{
+	examplePod := test.BuildTestPod(test.PodOpts{
 		NodeSelectorKey:   "customer",
-		NodeSelectorValue: "buildeng",
+		NodeSelectorValue: "example",
 	})
 	sharedPod := test.BuildTestPod(test.PodOpts{
 		NodeSelectorKey:   "customer",
@@ -161,9 +176,9 @@ func TestNewPodDefaultFilterFunc(t *testing.T) {
 		want bool
 	}{
 		{
-			"buildeng customer should fail",
+			"example customer should fail",
 			args{
-				buildengPod,
+				examplePod,
 			},
 			false,
 		},
@@ -220,13 +235,13 @@ func TestNewPodDefaultFilterFunc(t *testing.T) {
 }
 
 func TestNewNodeLabelFilterFunc(t *testing.T) {
-	buildengNode := test.BuildTestNode(test.NodeOpts{
+	exampleNode := test.BuildTestNode(test.NodeOpts{
 		LabelKey:   "customer",
-		LabelValue: "buildeng",
+		LabelValue: "example",
 	})
 	badKeyNode := test.BuildTestNode(test.NodeOpts{
 		LabelKey:   "wronglabelkey",
-		LabelValue: "buildeng",
+		LabelValue: "example",
 	})
 	badLabelNode := test.BuildTestNode(test.NodeOpts{
 		LabelKey:   "customer",
@@ -248,46 +263,46 @@ func TestNewNodeLabelFilterFunc(t *testing.T) {
 		want bool
 	}{
 		{
-			"buildeng customer should pass",
+			"example customer should pass",
 			args{
 				"customer",
-				"buildeng",
-				buildengNode,
+				"example",
+				exampleNode,
 			},
 			true,
 		},
 		{
-			"buildeng customer should fail",
+			"example customer should fail",
 			args{
 				"customer",
 				"kitt",
-				buildengNode,
+				exampleNode,
 			},
 			false,
 		},
 		{
-			"buildeng wrong key should fail",
+			"example wrong key should fail",
 			args{
 				"customer",
-				"buildeng",
+				"example",
 				badKeyNode,
 			},
 			false,
 		},
 		{
-			"buildeng wrong value should fail",
+			"example wrong value should fail",
 			args{
 				"customer",
-				"buildeng",
+				"example",
 				badLabelNode,
 			},
 			false,
 		},
 		{
-			"buildeng bad both should fail",
+			"example bad both should fail",
 			args{
 				"customer",
-				"buildeng",
+				"example",
 				badBothNode,
 			},
 			false,
@@ -310,15 +325,16 @@ func TestUnmarshalNodeGroupOptions(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(opts))
 		assert.NotNil(t, opts[0])
-		assert.Equal(t, "buildeng", opts[0].Name)
+		assert.Equal(t, "example", opts[0].Name)
 		assert.Equal(t, "customer", opts[0].LabelKey)
-		assert.Equal(t, "buildeng", opts[0].LabelValue)
+		assert.Equal(t, "example", opts[0].LabelValue)
 		assert.Equal(t, 5, opts[0].MinNodes)
 		assert.Equal(t, 300, opts[0].MaxNodes)
 		assert.Equal(t, true, opts[0].DryMode)
 		assert.Equal(t, "10m", opts[0].SoftDeleteGracePeriod)
 		assert.Equal(t, time.Minute*10, opts[0].SoftDeleteGracePeriodDuration())
 		assert.Equal(t, time.Duration(0), opts[0].HardDeleteGracePeriodDuration())
+		assert.Equal(t, v1.TaintEffectNoExecute, opts[0].TaintEffect)
 
 		assert.NotNil(t, opts[1])
 		assert.Equal(t, "default", opts[1].Name)
@@ -327,6 +343,7 @@ func TestUnmarshalNodeGroupOptions(t *testing.T) {
 		assert.Equal(t, 1, opts[1].MinNodes)
 		assert.Equal(t, 10, opts[1].MaxNodes)
 		assert.Equal(t, true, opts[1].DryMode)
+		assert.Equal(t, v1.TaintEffectNoSchedule, opts[1].TaintEffect)
 	})
 
 	t.Run("test yaml unmarshal bad", func(t *testing.T) {
@@ -337,19 +354,20 @@ func TestUnmarshalNodeGroupOptions(t *testing.T) {
 		assert.Empty(t, opts)
 	})
 
-	t.Run("test yaml unmarshal Buildeng good", func(t *testing.T) {
+	t.Run("test yaml unmarshal example good", func(t *testing.T) {
 		yamlReader := strings.NewReader(yamlBE)
 		opts, err := UnmarshalNodeGroupOptions(yamlReader)
 
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(opts))
 		assert.NotNil(t, opts[0])
-		assert.Equal(t, "buildeng", opts[0].Name)
+		assert.Equal(t, "example", opts[0].Name)
 		assert.Equal(t, "customer", opts[0].LabelKey)
-		assert.Equal(t, "buildeng", opts[0].LabelValue)
+		assert.Equal(t, "example", opts[0].LabelValue)
 		assert.Equal(t, 10, opts[0].MinNodes)
 		assert.Equal(t, 300, opts[0].MaxNodes)
 		assert.Equal(t, false, opts[0].DryMode)
+		assert.Empty(t, opts[0].TaintEffect)
 	})
 }
 
@@ -360,9 +378,9 @@ node_groups:
 
 var yamlValid = `
 node_groups:
-  - name: "buildeng"
+  - name: "example"
     label_key: "customer"
-    label_value: "buildeng"
+    label_value: "example"
     min_nodes: 5
     max_nodes: 300
     dry_mode: true
@@ -375,6 +393,7 @@ node_groups:
     soft_delete_grace_period: 10m
     hard_delete_grace_period: 42
     scale_up_cooldown_period: 1h2m30s
+    taint_effect: NoExecute
   - name: "default"
     label_key: "customer"
     label_value: "shared"
@@ -386,12 +405,13 @@ node_groups:
     slow_node_removal_rate: 2
     fast_node_removal_rate: 3
     scale_up_cooldown_period: 21h
+    taint_effect: NoSchedule
 `
 
 var yamlBE = `node_groups:
-  - name: "buildeng"
+  - name: "example"
     label_key: "customer"
-    label_value: "buildeng"
+    label_value: "example"
     min_nodes: 10
     max_nodes: 300
     dry_mode: false
@@ -427,6 +447,30 @@ func TestValidateNodeGroup(t *testing.T) {
 					SoftDeleteGracePeriod:              "10m",
 					HardDeleteGracePeriod:              "1h10m",
 					ScaleUpCoolDownPeriod:              "55m",
+					TaintEffect:                        "NoExecute",
+				},
+			},
+			nil,
+		},
+		{
+			"valid nodegroup with empty TaintEffect",
+			args{
+				NodeGroupOptions{
+					Name:                               "test",
+					LabelKey:                           "customer",
+					LabelValue:                         "buileng",
+					CloudProviderGroupName:             "somegroup",
+					TaintUpperCapacityThresholdPercent: 70,
+					TaintLowerCapacityThresholdPercent: 60,
+					ScaleUpThresholdPercent:            100,
+					MinNodes:                           1,
+					MaxNodes:                           3,
+					SlowNodeRemovalRate:                1,
+					FastNodeRemovalRate:                2,
+					SoftDeleteGracePeriod:              "10m",
+					HardDeleteGracePeriod:              "1h10m",
+					ScaleUpCoolDownPeriod:              "55m",
+					TaintEffect:                        "",
 				},
 			},
 			nil,
@@ -449,6 +493,7 @@ func TestValidateNodeGroup(t *testing.T) {
 					SoftDeleteGracePeriod:              "10",
 					HardDeleteGracePeriod:              "1h10m",
 					ScaleUpCoolDownPeriod:              "21h21m21s",
+					TaintEffect:                        "invalid",
 				},
 			},
 			[]string{
@@ -457,6 +502,7 @@ func TestValidateNodeGroup(t *testing.T) {
 				"min_nodes must be less than max_nodes",
 				"max_nodes must be larger than 0",
 				"soft_delete_grace_period failed to parse into a time.Duration. check your formatting.",
+				"taint_effect must be valid kubernetes taint",
 			},
 		},
 	}

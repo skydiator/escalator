@@ -8,7 +8,7 @@ import (
 	"github.com/atlassian/escalator/pkg/k8s"
 	"github.com/atlassian/escalator/pkg/test"
 	"github.com/stretchr/testify/assert"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 )
 
 func TestControllerScaleUpUntaint(t *testing.T) {
@@ -45,7 +45,7 @@ func TestControllerUntaintNewestN(t *testing.T) {
 
 	nodeGroups := []NodeGroupOptions{
 		{
-			Name:     "buildeng",
+			Name:     "example",
 			MinNodes: 1,
 			MaxNodes: 5,
 			DryMode:  false,
@@ -81,7 +81,7 @@ func TestControllerUntaintNewestN(t *testing.T) {
 			"first 3 nodes. untaint 3",
 			args{
 				nodes[:3],
-				nodeGroupsState["buildeng"],
+				nodeGroupsState["example"],
 				3,
 			},
 			[]int{0, 2, 1},
@@ -90,7 +90,7 @@ func TestControllerUntaintNewestN(t *testing.T) {
 			"first 3 nodes. untaint 2",
 			args{
 				nodes[:3],
-				nodeGroupsState["buildeng"],
+				nodeGroupsState["example"],
 				2,
 			},
 			[]int{0, 2},
@@ -99,7 +99,7 @@ func TestControllerUntaintNewestN(t *testing.T) {
 			"6 nodes. untaint 0",
 			args{
 				nodes,
-				nodeGroupsState["buildeng"],
+				nodeGroupsState["example"],
 				0,
 			},
 			[]int{},
@@ -108,7 +108,7 @@ func TestControllerUntaintNewestN(t *testing.T) {
 			"6 nodes. untaint 2",
 			args{
 				nodes,
-				nodeGroupsState["buildeng"],
+				nodeGroupsState["example"],
 				2,
 			},
 			[]int{3, 0},
@@ -117,7 +117,7 @@ func TestControllerUntaintNewestN(t *testing.T) {
 			"6 nodes. untaint 6",
 			args{
 				nodes,
-				nodeGroupsState["buildeng"],
+				nodeGroupsState["example"],
 				6,
 			},
 			[]int{3, 0, 2, 1, 5, 4},
@@ -126,7 +126,7 @@ func TestControllerUntaintNewestN(t *testing.T) {
 			"6 nodes. untaint 5",
 			args{
 				nodes,
-				nodeGroupsState["buildeng"],
+				nodeGroupsState["example"],
 				5,
 			},
 			[]int{3, 0, 2, 1, 5},
@@ -135,7 +135,7 @@ func TestControllerUntaintNewestN(t *testing.T) {
 			"6 nodes. untaint 7",
 			args{
 				nodes,
-				nodeGroupsState["buildeng"],
+				nodeGroupsState["example"],
 				7,
 			},
 			[]int{3, 0, 2, 1, 5, 4},
@@ -144,7 +144,7 @@ func TestControllerUntaintNewestN(t *testing.T) {
 			"4 nodes. untaint 1",
 			args{
 				nodes[:4],
-				nodeGroupsState["buildeng"],
+				nodeGroupsState["example"],
 				1,
 			},
 			[]int{3},
@@ -160,17 +160,15 @@ func TestControllerUntaintNewestN(t *testing.T) {
 			}
 
 			// taint all
-			k8s.BeginTaintFailSafe(len(nodes))
 			var tc int
 			for _, node := range nodes {
 				if _, tainted := k8s.GetToBeRemovedTaint(node); !tainted {
-					k8s.AddToBeRemovedTaint(node, client)
-					nodeGroupsState["buildeng"].taintTracker = append(nodeGroupsState["buildeng"].taintTracker, node.Name)
+					k8s.AddToBeRemovedTaint(node, client, "NoSchedule")
+					nodeGroupsState["example"].taintTracker = append(nodeGroupsState["example"].taintTracker, node.Name)
 					<-updateChan
 					tc++
 				}
 			}
-			k8s.EndTaintFailSafe(tc)
 
 			// test wet mode
 			c.Opts.DryMode = false

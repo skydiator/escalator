@@ -2,13 +2,15 @@ package aws
 
 import (
 	"fmt"
+	"testing"
+
+	"github.com/atlassian/escalator/pkg/cloudprovider"
 	"github.com/atlassian/escalator/pkg/test"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/stretchr/testify/assert"
-	"k8s.io/api/core/v1"
-	"testing"
+	v1 "k8s.io/api/core/v1"
 )
 
 func TestCloudProvider_Name(t *testing.T) {
@@ -24,15 +26,14 @@ func TestCloudProvider_NodeGroups(t *testing.T) {
 		{
 			"single node group",
 			map[string]*NodeGroup{
-				"1": NewNodeGroup("1", &autoscaling.Group{}, &CloudProvider{}),
+				"1": NewNodeGroup(&cloudprovider.NodeGroupConfig{GroupID: "1"}, &autoscaling.Group{}, &CloudProvider{}),
 			},
 		},
 		{
 			"multiple node groups",
 			map[string]*NodeGroup{
-				"1": NewNodeGroup("1", &autoscaling.Group{}, &CloudProvider{}),
-				"2": NewNodeGroup("2", &autoscaling.Group{}, &CloudProvider{}),
-			},
+				"1": NewNodeGroup(&cloudprovider.NodeGroupConfig{GroupID: "1"}, &autoscaling.Group{}, &CloudProvider{}),
+				"2": NewNodeGroup(&cloudprovider.NodeGroupConfig{GroupID: "2"}, &autoscaling.Group{}, &CloudProvider{})},
 		},
 		{
 			"no node groups",
@@ -60,7 +61,7 @@ func TestCloudProvider_GetNodeGroup(t *testing.T) {
 		{
 			"get a node group that exists",
 			map[string]*NodeGroup{
-				"1": NewNodeGroup("1", &autoscaling.Group{}, &CloudProvider{}),
+				"1": NewNodeGroup(&cloudprovider.NodeGroupConfig{GroupID: "1"}, &autoscaling.Group{}, &CloudProvider{}),
 			},
 			"1",
 			true,
@@ -260,12 +261,12 @@ func TestCloudProvider_GetInstance(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a mock ec2 service
-			ec2_service := &test.MockEc2Service{
+			ec2Service := &test.MockEc2Service{
 				DescribeInstancesOutput: tt.response,
 				DescribeInstancesErr:    tt.err,
 			}
 
-			awsCloudProvider, err := newMockCloudProvider(nodeGroups, nil, ec2_service)
+			awsCloudProvider, err := newMockCloudProvider(nodeGroups, nil, ec2Service)
 
 			assert.Nil(t, err)
 

@@ -2,12 +2,13 @@ package test
 
 import (
 	"github.com/pkg/errors"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	listerv1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 )
 
+// NewTestNodeWatcher creates a new mock NodeLister with the given nodes and options
 func NewTestNodeWatcher(nodes []*v1.Node, opts NodeListerOptions) listerv1.NodeLister {
 	store := cache.NewStore(cache.MetaNamespaceKeyFunc)
 	for _, node := range nodes {
@@ -16,6 +17,7 @@ func NewTestNodeWatcher(nodes []*v1.Node, opts NodeListerOptions) listerv1.NodeL
 	return &nodeLister{store, opts}
 }
 
+// NodeListerOptions options for creating test NodeLister
 type NodeListerOptions struct {
 	ReturnErrorOnList bool
 }
@@ -36,9 +38,5 @@ func (lister *nodeLister) List(selector labels.Selector) (ret []*v1.Node, err er
 }
 
 func (lister *nodeLister) Get(name string) (*v1.Node, error) {
-	return nil, nil
-}
-
-func (lister *nodeLister) ListWithPredicate(predicate listerv1.NodeConditionPredicate) ([]*v1.Node, error) {
 	return nil, nil
 }

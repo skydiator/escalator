@@ -23,6 +23,7 @@ scaling up the cluster as fast as possible to ensure pods are not left in a pend
 - Support for different cloud providers - AWS only at the moment
 - Scaling and utilisation metrics
 - Leader election so you can run a HA Deployment inside a cluster.
+- Basic support for multiple different types of instances in a Node Group.
 
 The need for this autoscaler is derived from our own experiences with very large batch workloads being scheduled and the
 default autoscaler not scaling up the cluster fast enough. These workloads can't be force-drained by the default 
@@ -42,17 +43,18 @@ See [Docs](docs/README.md)
 
 - [Kubernetes](https://kubernetes.io/) version 1.8+. Escalator has been tested and deployed on 1.8+ and newer. Older 
 versions of Kubernetes may have bugs or issues that will prevent it from functioning properly.
-- [Dep](https://golang.github.io/dep/). It is recommended to use a recent release from 
-[https://github.com/golang/dep/releases](https://github.com/golang/dep/releases)
-- [Go](https://golang.org/) version 1.10+, but newer versions of Go are highly recommended.
-- Dependencies and their locked versions can be found in `Gopkg.toml` and `Gopkg.lock`.
+- [Go](https://golang.org/) version 1.12+ with `GO111MODULE=on`, but Go 1.13+ is highly recommended as Escalator uses go modules for dependencies.
+- Dependencies and their locked versions can be found in `go.mod` and `go.sum`.
 
 ## Building
 
 ```bash
-# Install dependencies
-make setup
-# Build Escalator
+# If using Go 1.12 make sure to enable Go modules support. For Go 1.13 you can ignore this
+export GO111MODULE=on
+```
+
+```bash
+# Fetch dependencies and build Escalator
 make build
 ```
 
@@ -105,7 +107,7 @@ go test ./pkg/controller
 Pull requests, issues and comments welcome. For pull requests:
 
 * Add tests for new features and bug fixes
-* Follow the existing style
+* Follow the existing style (we are using [goreturns](https://github.com/sqs/goreturns) to format and lint escalator)
 * Separate unrelated changes into multiple pull requests
 
 See the existing issues for things to start contributing.
@@ -124,8 +126,8 @@ link below to digitally sign the CLA. The Corporate CLA is for those who are
 contributing as a member of an organization and the individual CLA is for
 those contributing as an individual.
 
-* [CLA for corporate contributors](https://na2.docusign.net/Member/PowerFormSigning.aspx?PowerFormId=e1c17c66-ca4d-4aab-a953-2c231af4a20b)
-* [CLA for individuals](https://na2.docusign.net/Member/PowerFormSigning.aspx?PowerFormId=3f94fbdc-2fbe-46ac-b14c-5d152700ae5d)
+* [CLA for corporate contributors](https://opensource.atlassian.com/corporate)
+* [CLA for individuals](https://opensource.atlassian.com/individual)
 
 ## License
 

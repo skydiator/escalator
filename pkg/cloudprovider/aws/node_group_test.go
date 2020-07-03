@@ -8,21 +8,22 @@ import (
 	"github.com/atlassian/escalator/pkg/test"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
+	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestNodeGroup_ID(t *testing.T) {
 	id := "nodegroup"
-	nodeGroup := NewNodeGroup(id, &autoscaling.Group{}, &CloudProvider{})
+	nodeGroup := NewNodeGroup(&cloudprovider.NodeGroupConfig{GroupID: id}, &autoscaling.Group{}, &CloudProvider{})
 	assert.Equal(t, id, nodeGroup.ID())
 }
 
 func TestNodeGroup_String(t *testing.T) {
-	nodeGroup := NewNodeGroup("nodegroup", &autoscaling.Group{}, &CloudProvider{})
+	nodeGroup := NewNodeGroup(&cloudprovider.NodeGroupConfig{GroupID: "nodegroup"}, &autoscaling.Group{}, &CloudProvider{})
 	assert.IsType(t, "string", nodeGroup.String())
 }
 
@@ -33,7 +34,7 @@ func TestNodeGroup_MinSize(t *testing.T) {
 		MinSize: aws.Int64(minSize),
 	}
 
-	nodeGroup := NewNodeGroup("nodegroup", asg, &CloudProvider{})
+	nodeGroup := NewNodeGroup(&cloudprovider.NodeGroupConfig{GroupID: "nodegroup"}, asg, &CloudProvider{})
 	assert.Equal(t, minSize, nodeGroup.MinSize())
 }
 
@@ -44,7 +45,7 @@ func TestNodeGroup_MaxSize(t *testing.T) {
 		MaxSize: aws.Int64(maxSize),
 	}
 
-	nodeGroup := NewNodeGroup("nodegroup", asg, &CloudProvider{})
+	nodeGroup := NewNodeGroup(&cloudprovider.NodeGroupConfig{GroupID: "nodegroup"}, asg, &CloudProvider{})
 	assert.Equal(t, maxSize, nodeGroup.MaxSize())
 }
 
@@ -56,7 +57,7 @@ func TestNodeGroup_TargetSize(t *testing.T) {
 		DesiredCapacity: aws.Int64(desiredCapacity),
 	}
 
-	nodeGroup := NewNodeGroup(id, asg, &CloudProvider{})
+	nodeGroup := NewNodeGroup(&cloudprovider.NodeGroupConfig{GroupID: id}, asg, &CloudProvider{})
 	assert.Equal(t, desiredCapacity, nodeGroup.TargetSize())
 }
 
@@ -92,7 +93,7 @@ func TestNodeGroup_Size(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			asg := &autoscaling.Group{Instances: tt.instances}
-			nodeGroup := NewNodeGroup("nodegroup", asg, &CloudProvider{})
+			nodeGroup := NewNodeGroup(&cloudprovider.NodeGroupConfig{GroupID: "nodegroup"}, asg, &CloudProvider{})
 			assert.Equal(t, tt.expected, nodeGroup.Size())
 		})
 	}
@@ -155,6 +156,7 @@ func TestNodeGroup_IncreaseSize(t *testing.T) {
 		},
 	}
 
+	// Run tests with ASG scaling
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var nodeGroupNames []string
@@ -169,6 +171,131 @@ func TestNodeGroup_IncreaseSize(t *testing.T) {
 			},
 				nil)
 			assert.Nil(t, err)
+
+			for _, nodeGroup := range awsCloudProvider.NodeGroups() {
+				err = nodeGroup.IncreaseSize(tt.increaseSize)
+				if tt.err == nil {
+					require.NoError(t, err)
+				} else {
+					require.EqualError(t, tt.err, err.Error())
+				}
+			}
+		})
+	}
+}
+
+func TestNodeGroup_IncreaseSize_CreateFleet(t *testing.T) {
+	setupAWSMocks()
+	fleetID := "fleet-1234"
+	errorCode := "error code"
+	errorMessage := "error message"
+	instanceID := "instanceID"
+	multipleBatches := batchSize + 1
+	multipleBatchesInstanceIDs := make([]*string, multipleBatches)
+	for i := 0; i < multipleBatches; i++ {
+		multipleBatchesInstanceIDs = append(multipleBatchesInstanceIDs, &instanceID)
+	}
+
+	createFleetTests := []struct {
+		name              string
+		increaseSize      int64
+		createFleetOutput *ec2.CreateFleetOutput
+		err               error
+	}{
+		{
+			"normal increase",
+			int64(1),
+			&ec2.CreateFleetOutput{
+				Errors:  nil,
+				FleetId: &fleetID,
+				Instances: []*ec2.CreateFleetInstance{
+					{
+						InstanceIds: []*string{&instanceID},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"normal increase with error",
+			int64(1),
+			&ec2.CreateFleetOutput{
+				Errors: []*ec2.CreateFleetError{
+					{
+						LaunchTemplateAndOverrides: nil,
+						Lifecycle:                  nil,
+						ErrorCode:                  &errorCode,
+						ErrorMessage:               &errorMessage,
+					},
+				},
+				FleetId: &fleetID,
+				Instances: []*ec2.CreateFleetInstance{
+					{
+						InstanceIds: []*string{&instanceID},
+					},
+				},
+			},
+			nil,
+		},
+		{
+			"no instances error",
+			int64(5),
+			&ec2.CreateFleetOutput{
+				Errors: []*ec2.CreateFleetError{
+					{
+						LaunchTemplateAndOverrides: nil,
+						Lifecycle:                  nil,
+						ErrorCode:                  &errorCode,
+						ErrorMessage:               &errorMessage,
+					},
+				},
+				FleetId:   &fleetID,
+				Instances: make([]*ec2.CreateFleetInstance, 0),
+			},
+			errors.New(errorMessage),
+		},
+		{
+			"multiple AttachInstances batches",
+			int64(multipleBatches),
+			&ec2.CreateFleetOutput{
+				Errors:  nil,
+				FleetId: &fleetID,
+				Instances: []*ec2.CreateFleetInstance{
+					{
+						InstanceIds: multipleBatchesInstanceIDs,
+					},
+				},
+			},
+			nil,
+		},
+	}
+
+	// Necessary for setting up node group
+	autoScalingGroup := []*autoscaling.Group{&mockASG}
+
+	// Run tests with CreateFleet scaling
+	for _, tt := range createFleetTests {
+		t.Run(tt.name, func(t *testing.T) {
+			nodeGroup := NodeGroup{
+				id:     "id",
+				name:   "name",
+				asg:    autoScalingGroup[0],
+				config: &mockNodeGroupConfig,
+			}
+			nodeGroups := map[string]*NodeGroup{nodeGroup.id: &nodeGroup}
+
+			awsCloudProvider, err := newMockCloudProviderUsingInjection(
+				nodeGroups,
+				&test.MockAutoscalingService{
+					DescribeAutoScalingGroupsOutput: &autoscaling.DescribeAutoScalingGroupsOutput{
+						AutoScalingGroups: autoScalingGroup,
+					},
+				},
+				&test.MockEc2Service{
+					CreateFleetOutput:       tt.createFleetOutput,
+					DescribeInstancesOutput: &ec2.DescribeInstancesOutput{},
+				},
+			)
 
 			for _, nodeGroup := range awsCloudProvider.NodeGroups() {
 				err = nodeGroup.IncreaseSize(tt.increaseSize)

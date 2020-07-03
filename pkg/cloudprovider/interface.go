@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 )
 
 // CloudProvider contains configuration info and functions for interacting with
@@ -20,12 +20,14 @@ type CloudProvider interface {
 	GetNodeGroup(string) (NodeGroup, bool)
 
 	// RegisterNodeGroup adds the nodegroup to the list of nodes groups
-	RegisterNodeGroups(...string) error
+	RegisterNodeGroups(...NodeGroupConfig) error
 
 	// Refresh is called before every main loop and can be used to dynamically update cloud provider state.
 	// In particular the list of node groups returned by NodeGroups can change as a result of CloudProvider.Refresh().
 	Refresh() error
 
+	// GetInstance returns a cloud provider Instance for the provided node. Contains the cloud provider specific
+	// instance for cloud provider specific results.
 	GetInstance(node *v1.Node) (Instance, error)
 }
 
@@ -34,8 +36,8 @@ type Instance interface {
 	// InstantiationTime gets the time the resource was instantiated
 	InstantiationTime() time.Time
 
-	// Id gets the cloud provider resource identifier
-	Id() string
+	// ID gets the cloud provider resource identifier
+	ID() string
 }
 
 // NodeGroup contains configuration info and functions to control a set
@@ -46,6 +48,9 @@ type NodeGroup interface {
 
 	// ID returns an unique identifier of the node group.
 	ID() string
+
+	// Name returns the name of the node group for this cloud provider node group.
+	Name() string
 
 	// MinSize returns minimum size of the node group.
 	MinSize() int64
@@ -93,6 +98,23 @@ type Builder interface {
 
 // BuildOpts providers all options to create your cloud provider
 type BuildOpts struct {
-	ProviderID   string
-	NodeGroupIDs []string
+	ProviderID       string
+	NodeGroupConfigs []NodeGroupConfig
+}
+
+// NodeGroupConfig contains the configuration for a node group
+type NodeGroupConfig struct {
+	Name      string
+	GroupID   string
+	AWSConfig AWSNodeGroupConfig
+}
+
+// AWSNodeGroupConfig contains the AWS cloud provider specific configuration
+// for a node group
+type AWSNodeGroupConfig struct {
+	LaunchTemplateID          string
+	LaunchTemplateVersion     string
+	FleetInstanceReadyTimeout time.Duration
+	Lifecycle                 string
+	InstanceTypeOverrides     []string
 }

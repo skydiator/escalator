@@ -7,6 +7,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// NAMESPACE is the prometheus prefix namespace for the exported metrics
 const NAMESPACE = "escalator"
 
 var (
@@ -34,7 +35,7 @@ var (
 		},
 		[]string{"node_group"},
 	)
-	// NodeGroupNodes nodes considered by specific node groups
+	// NodeGroupNodesCordoned nodes considered by specific node groups
 	NodeGroupNodesCordoned = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name:      "node_group_cordoned_nodes",
@@ -61,7 +62,7 @@ var (
 		},
 		[]string{"node_group"},
 	)
-	// NodeGroupsPodEvicted pods evicted during a scale down
+	// NodeGroupPodsEvicted pods evicted during a scale down
 	NodeGroupPodsEvicted = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name:      "node_group_pods_evicted",
@@ -196,7 +197,7 @@ var (
 			Namespace: NAMESPACE,
 			Help:      "current cloud provider minimum size",
 		},
-		[]string{"cloud_provider", "id"},
+		[]string{"cloud_provider", "id", "node_group"},
 	)
 	// CloudProviderMaxSize indicates the current cloud provider maximum size
 	CloudProviderMaxSize = prometheus.NewGaugeVec(
@@ -205,7 +206,7 @@ var (
 			Namespace: NAMESPACE,
 			Help:      "current cloud provider maximum size",
 		},
-		[]string{"cloud_provider", "id"},
+		[]string{"cloud_provider", "id", "node_group"},
 	)
 	// CloudProviderTargetSize indicates the current cloud provider target size
 	CloudProviderTargetSize = prometheus.NewGaugeVec(
@@ -214,7 +215,7 @@ var (
 			Namespace: NAMESPACE,
 			Help:      "current cloud provider target size",
 		},
-		[]string{"cloud_provider", "id"},
+		[]string{"cloud_provider", "id", "node_group"},
 	)
 	// CloudProviderSize indicates the current cloud provider size
 	CloudProviderSize = prometheus.NewGaugeVec(
@@ -223,7 +224,7 @@ var (
 			Namespace: NAMESPACE,
 			Help:      "current cloud provider size",
 		},
-		[]string{"cloud_provider", "id"},
+		[]string{"cloud_provider", "id", "node_group"},
 	)
 )
 
@@ -256,6 +257,7 @@ func init() {
 
 // Start starts the metrics endpoint on a new thread
 func Start(addr string) {
-	http.Handle("/metrics", promhttp.Handler())
-	go http.ListenAndServe(addr, nil)
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	go http.ListenAndServe(addr, mux)
 }
