@@ -19,12 +19,17 @@ Escalator requires the following IAM policy to be able to properly integrate wit
       "Effect": "Allow",
       "Action": [
         "autoscaling:AttachInstances",
+        "autoscaling:CreateOrUpdateTags",
         "autoscaling:DescribeAutoScalingGroups",
         "autoscaling:SetDesiredCapacity",
         "autoscaling:TerminateInstanceInAutoScalingGroup",
         "ec2:CreateFleet",
+        "ec2:CreateTags",
+        "ec2:DescribeInstances",
         "ec2:DescribeInstanceStatus",
-        "ec2:DescribeInstances"
+        "ec2:RunInstances",
+        "ec2:TerminateInstances",
+        "iam:PassRole"
       ],
       "Resource": "*"
     }

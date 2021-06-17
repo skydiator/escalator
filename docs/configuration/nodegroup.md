@@ -28,10 +28,11 @@ node_groups:
     taint_effect: NoExecute
     aws:
         fleet_instance_ready_timeout: 1m
-        launch_template_version: lt-1a2b3c4d
-        launch_template_id: "1"
+        launch_template_id: lt-1a2b3c4d
+        launch_template_version: "1"
         lifecycle: on-demand
         instance_type_overrides: ["t2.large", "t3.large"]
+        resource_tagging: false
 ```
 
 ## Options
@@ -175,7 +176,7 @@ nodes enough time to finish before the node is terminated.
 
 Logic for determining if a node is empty can be found in `pkg/k8s` `NodeEmpty()`
 
-### `taint-effect`
+### `taint_effect`
 
 This is an optional field and the value defines the taint effect that will be applied to the nodes when scaling down.
 The valid values are :
@@ -242,3 +243,9 @@ Dependent on Launch Template ID being specified.
 An optional list of instance types to override the instance type within the launch template. Providing multiple instance
 types here increases the likelihood of a Spot request being successful. If omitted the instance type to request will
 be taken from the launch template.
+
+### `aws.resource_tagging`
+
+Tag ASG and Fleet Request resources used by Escalator with the metatdata key-value pair
+`k8s.io/atlassian-escalator/enabled`:`true`. Tagging doesn't alter the functionality of Escalator. Read more about
+tagging your AWS resources [here](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Using_Tags.html).

@@ -16,6 +16,9 @@ type MockAutoscalingService struct {
 	AttachInstanceOutput *autoscaling.AttachInstancesOutput
 	AttachInstanceErr    error
 
+	CreateOrUpdateTagsOutput *autoscaling.CreateOrUpdateTagsOutput
+	CreateOrUpdateTagsErr    error
+
 	DescribeAutoScalingGroupsOutput *autoscaling.DescribeAutoScalingGroupsOutput
 	DescribeAutoScalingGroupsErr    error
 
@@ -29,6 +32,11 @@ type MockAutoscalingService struct {
 // AttachInstances mock implementation for MockAutoscalingService
 func (m MockAutoscalingService) AttachInstances(*autoscaling.AttachInstancesInput) (*autoscaling.AttachInstancesOutput, error) {
 	return m.AttachInstanceOutput, m.AttachInstanceErr
+}
+
+// CreateOrUpdateTags mock implementation for MockAutoscalingService
+func (m MockAutoscalingService) CreateOrUpdateTags(*autoscaling.CreateOrUpdateTagsInput) (*autoscaling.CreateOrUpdateTagsOutput, error) {
+	return m.CreateOrUpdateTagsOutput, m.CreateOrUpdateTagsErr
 }
 
 // DescribeAutoScalingGroups mock implementation for MockAutoscalingService
@@ -59,6 +67,10 @@ type MockEc2Service struct {
 
 	DescribeInstanceStatusOutput *ec2.DescribeInstanceStatusOutput
 	DescribeInstanceStatusErr    error
+	AllInstancesReady            bool
+
+	TerminateInstancesOutput *ec2.TerminateInstancesOutput
+	TerminateInstancesErr    error
 }
 
 // DescribeInstances mock implementation for MockEc2Service
@@ -73,7 +85,12 @@ func (m MockEc2Service) CreateFleet(*ec2.CreateFleetInput) (*ec2.CreateFleetOutp
 
 // DescribeInstanceStatusPages mock implementation for MockEc2Service
 func (m MockEc2Service) DescribeInstanceStatusPages(statusInput *ec2.DescribeInstanceStatusInput, allInstancesReadyHelper func(*ec2.DescribeInstanceStatusOutput, bool) bool) error {
-	// Mocks successful execution of the anonymous function within cloudprovider/aws/aws.go:allInstancesReady
-	allInstancesReadyHelper(&ec2.DescribeInstanceStatusOutput{}, true)
+	// Mocks execution of the anonymous function within cloudprovider/aws/aws.go:allInstancesReady
+	allInstancesReadyHelper(&ec2.DescribeInstanceStatusOutput{}, m.AllInstancesReady)
 	return nil
+}
+
+// TerminateInstances mock implementation for MockEc2Service
+func (m MockEc2Service) TerminateInstances(*ec2.TerminateInstancesInput) (*ec2.TerminateInstancesOutput, error) {
+	return m.TerminateInstancesOutput, m.TerminateInstancesErr
 }
